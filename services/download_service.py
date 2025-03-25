@@ -11,15 +11,17 @@ from urllib.parse import urlparse
 import logging
 import re
 import mimetypes
+from config import DOWNLOAD_DIR as DEFAULT_DOWNLOAD_DIR
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class DownloadService:
-    def __init__(self, download_dir="data/downloads"):
+    def __init__(self, download_dir=None):
         """初始化下载器"""
-        self.download_dir = download_dir
+        # 使用传入的路径或配置中的路径
+        self.download_dir = download_dir or DEFAULT_DOWNLOAD_DIR
         # 确保下载目录存在
         os.makedirs(self.download_dir, exist_ok=True)
         # 初始化MIME类型

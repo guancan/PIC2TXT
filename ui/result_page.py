@@ -15,23 +15,32 @@ def show_result_page():
     
     # 获取所有任务
     db = DatabaseManager()
-    tasks = db.get_all_tasks()
-    
-    # 过滤出已完成的任务
-    completed_tasks = [task for task in tasks if task['status'] == 'completed']
+    try:
+        tasks = db.get_all_tasks()
+        # 过滤出已完成的任务
+        completed_tasks = [task for task in tasks if task['status'] == 'completed']
+        st.write(f"共找到 {len(completed_tasks)} 个已完成任务")
+    except Exception as e:
+        st.error(f"获取任务失败: {str(e)}")
+        completed_tasks = []
     
     if not completed_tasks:
         st.info("暂无已完成的任务")
         return
     
     # 创建任务选择器
-    task_options = {f"任务 #{task['id']} - {task['url'][:30] if task['url'] else task['file_path'][:30]}...": task['id'] for task in completed_tasks}
+    task_options = {f"任务 #{task['id']} - {task.get('url', '')[:30] if task.get('url') else task.get('file_path', '')[:30]}...": task['id'] for task in completed_tasks}
     selected_task_name = st.selectbox("选择已完成的任务", list(task_options.keys()))
     selected_task_id = task_options[selected_task_name]
     
     # 获取任务详情
-    task = db.get_task(selected_task_id)
-    results = db.get_results_by_task(selected_task_id)
+    try:
+        task = db.get_task(selected_task_id)
+        results = db.get_results_by_task(selected_task_id)
+    except Exception as e:
+        st.error(f"获取任务结果失败: {str(e)}")
+        task = None
+        results = []
     
     if not task or not results:
         st.warning("无法获取任务结果")
@@ -62,7 +71,7 @@ def show_result_page():
         st.text_area("识别的文本", result["text_content"], height=300)
     
     # 提供下载链接
-    if os.path.exists(result["result_path"]):
+    if result.get("result_path") and os.path.exists(result["result_path"]):
         with open(result["result_path"], "rb") as file:
             st.download_button(
                 label="下载文本文件",

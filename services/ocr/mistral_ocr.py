@@ -177,4 +177,51 @@ class MistralOCRService(BaseOCRService):
             return {
                 "success": False,
                 "error": f"OCR处理时出错: {str(e)}"
-            } 
+            }
+
+    def process_images_batch(self, image_paths):
+        """
+        使用Mistral Batch API批量处理图片
+        
+        Args:
+            image_paths: 图片路径列表
+            
+        Returns:
+            批处理任务ID
+        """
+        try:
+            # 1. 上传图片文件
+            file_ids = []
+            for image_path in image_paths:
+                with open(image_path, "rb") as f:
+                    response = requests.post(
+                        "https://api.mistral.ai/v1/files",
+                        headers={"Authorization": f"Bearer {self.api_key}"},
+                        files={"file": f},
+                        data={"purpose": "ocr"}
+                    )
+                    response.raise_for_status()
+                    file_ids.append(response.json()["id"])
+            
+            # 2. 创建批处理任务
+            response = requests.post(
+                "https://api.mistral.ai/v1/batch/jobs",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "input_files": file_ids,
+                    "endpoint": "/v1/ocr",
+                    "model": "mistral-ocr",  # 使用适当的OCR模型
+                    "timeout_hours": 24
+                }
+            )
+            response.raise_for_status()
+            
+            # 返回批处理任务ID
+            return response.json()["id"]
+            
+        except Exception as e:
+            self.logger.error(f"批量OCR处理失败: {str(e)}")
+            raise OCRException(f"批量OCR请求失败: {str(e)}") 

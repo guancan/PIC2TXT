@@ -13,6 +13,7 @@ from database.db_manager import DatabaseManager  # 修改为使用DatabaseManage
 from services.download_service import DownloadService  # 更新导入名称
 from services.ocr_factory import OCRFactory
 import config
+import uuid
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -172,4 +173,54 @@ class TaskService:
                 logger.error(traceback.format_exc())
         
         logger.info(f"已删除 {count}/{len(tasks)} 个任务")
-        return count 
+        return count
+    
+    def create_batch_task(self, file_paths, ocr_engine="mistral"):
+        """
+        创建批量OCR任务
+        
+        Args:
+            file_paths: 本地文件路径列表
+            ocr_engine: OCR引擎类型
+            
+        Returns:
+            批量任务ID
+        """
+        # 创建批量任务记录
+        batch_id = str(uuid.uuid4())
+        task_ids = []
+        
+        # 为每个文件创建单独的任务
+        for file_path in file_paths:
+            task_id = self.db_manager.create_task(
+                file_path=file_path, 
+                ocr_engine=ocr_engine,
+                batch_id=batch_id
+            )
+            task_ids.append(task_id)
+        
+        # 如果使用Mistral引擎，使用批量API
+        if ocr_engine == "mistral":
+            try:
+                # 获取OCR引擎实例
+                ocr_engine = OCRFactory.get_ocr_engine(ocr_engine)
+                
+                # 调用批量处理API
+                batch_job_id = ocr_engine.process_images_batch(file_paths)
+                
+                # 更新所有任务的批处理ID
+                for task_id in task_ids:
+                    self.db_manager.update_task_batch_job_id(task_id, batch_job_id)
+                    
+                return batch_id
+            except Exception as e:
+                logger.error(f"创建批量任务失败: {str(e)}")
+                # 将所有任务标记为失败
+                for task_id in task_ids:
+                    self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error=str(e))
+                return None
+        else:
+            # 对于其他引擎，使用常规处理方法
+            for task_id in task_ids:
+                self.process_task(task_id)
+            return batch_id 

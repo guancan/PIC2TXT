@@ -16,6 +16,11 @@ import config
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# 添加OCRException异常类定义
+class OCRException(Exception):
+    """OCR处理过程中的异常"""
+    pass
+
 class MistralOCRService(BaseOCRService):
     def __init__(self, result_dir, api_key=None):
         """

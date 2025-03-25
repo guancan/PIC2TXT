@@ -41,7 +41,7 @@ class TaskService:
             int: 任务ID
         """
         # 创建任务记录
-        task_id = self.db_manager.create_task(url=url)  # 使用db_manager创建任务
+        task_id = self.db_manager.create_task(url=url, ocr_engine=ocr_engine)  # 确保传递ocr_engine参数
         logger.info(f"创建任务 ID: {task_id}, URL: {url}, OCR引擎: {ocr_engine}")
         return task_id
     

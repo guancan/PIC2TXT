@@ -51,17 +51,17 @@ class DatabaseManager:
             self.close()
     
     # 任务相关操作
-    def create_task(self, url=None, file_path=None):
+    def create_task(self, url=None, file_path=None, ocr_engine="local"):
         """创建新任务"""
         conn = self.connect()
         try:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO tasks (url, file_path, status)
-                VALUES (?, ?, ?)
+                INSERT INTO tasks (url, file_path, status, ocr_engine)
+                VALUES (?, ?, ?, ?)
                 """,
-                (url, file_path, TASK_STATUS_PENDING)
+                (url, file_path, TASK_STATUS_PENDING, ocr_engine)
             )
             conn.commit()
             return cursor.lastrowid  # 返回新创建任务的ID

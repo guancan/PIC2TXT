@@ -16,13 +16,16 @@ TEMP_DIR = os.path.join(BASE_DIR, "temp")
 RESULT_DIR = os.path.join(BASE_DIR, "data/results")
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "data/downloads")
 
+# 数据库配置
+DB_PATH = os.path.join(BASE_DIR, "database.db")  # 添加数据库路径配置
+
 # 确保必要的目录存在
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(RESULT_DIR, exist_ok=True)
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # OCR引擎配置
-DEFAULT_OCR_ENGINE = "easyocr"  # 默认OCR引擎
+DEFAULT_OCR_ENGINE = "mistral"  # 默认OCR引擎
 
 # Mistral AI API配置
 # 从环境变量中获取API密钥

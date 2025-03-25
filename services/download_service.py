@@ -16,7 +16,7 @@ import mimetypes
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class Downloader:
+class DownloadService:
     def __init__(self, download_dir="data/downloads"):
         """初始化下载器"""
         self.download_dir = download_dir

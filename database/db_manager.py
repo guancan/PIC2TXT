@@ -6,6 +6,8 @@
 import sqlite3
 import os
 import datetime
+import logging
+import shutil
 from pathlib import Path
 from database.models import (
     CREATE_TASKS_TABLE, 
@@ -15,6 +17,9 @@ from database.models import (
     TASK_STATUS_COMPLETED,
     TASK_STATUS_FAILED
 )
+
+# 设置日志
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     def __init__(self, db_path="db.sqlite"):
@@ -26,17 +31,34 @@ class DatabaseManager:
     
     def connect(self):
         """连接到数据库"""
-        self.conn = sqlite3.connect(self.db_path)
-        self.conn.row_factory = sqlite3.Row  # 使查询结果可以通过列名访问
-        self.cursor = self.conn.cursor()
-        return self.conn
+        try:
+            self.conn = sqlite3.connect(self.db_path)
+            # 启用外键约束
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            # 设置超时时间
+            self.conn.execute("PRAGMA busy_timeout = 5000")
+            # 设置同步模式为NORMAL (1)，提高性能
+            self.conn.execute("PRAGMA synchronous = 1")
+            # 设置日志模式为WAL，提高性能和可靠性
+            self.conn.execute("PRAGMA journal_mode = WAL")
+            
+            self.conn.row_factory = sqlite3.Row  # 使查询结果可以通过列名访问
+            self.cursor = self.conn.cursor()
+            return self.conn
+        except sqlite3.Error as e:
+            logger.error(f"数据库连接错误: {str(e)}")
+            raise
     
     def close(self):
         """关闭数据库连接"""
         if self.conn:
-            self.conn.close()
-            self.conn = None
-            self.cursor = None
+            try:
+                self.conn.close()
+            except sqlite3.Error as e:
+                logger.error(f"关闭数据库连接错误: {str(e)}")
+            finally:
+                self.conn = None
+                self.cursor = None
     
     def initialize_db(self):
         """初始化数据库，创建必要的表"""
@@ -47,6 +69,10 @@ class DatabaseManager:
             # 创建结果表
             conn.execute(CREATE_RESULTS_TABLE)
             conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"初始化数据库错误: {str(e)}")
+            conn.rollback()
+            raise
         finally:
             self.close()
     
@@ -65,6 +91,10 @@ class DatabaseManager:
             )
             conn.commit()
             return cursor.lastrowid  # 返回新创建任务的ID
+        except sqlite3.Error as e:
+            logger.error(f"创建任务错误: {str(e)}")
+            conn.rollback()
+            raise
         finally:
             self.close()
     
@@ -81,6 +111,9 @@ class DatabaseManager:
             )
             task = cursor.fetchone()
             return dict(task) if task else None
+        except sqlite3.Error as e:
+            logger.error(f"获取任务错误: {str(e)}")
+            raise
         finally:
             self.close()
     
@@ -96,6 +129,9 @@ class DatabaseManager:
             )
             tasks = cursor.fetchall()
             return [dict(task) for task in tasks]
+        except sqlite3.Error as e:
+            logger.error(f"获取所有任务错误: {str(e)}")
+            raise
         finally:
             self.close()
     
@@ -112,6 +148,9 @@ class DatabaseManager:
             )
             tasks = cursor.fetchall()
             return [dict(task) for task in tasks]
+        except sqlite3.Error as e:
+            logger.error(f"获取待处理任务错误: {str(e)}")
+            raise
         finally:
             self.close()
     
@@ -130,6 +169,10 @@ class DatabaseManager:
             )
             conn.commit()
             return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logger.error(f"更新任务状态错误: {str(e)}")
+            conn.rollback()
+            raise
         finally:
             self.close()
     
@@ -148,6 +191,10 @@ class DatabaseManager:
             )
             conn.commit()
             return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logger.error(f"更新任务文件路径错误: {str(e)}")
+            conn.rollback()
+            raise
         finally:
             self.close()
     
@@ -173,7 +220,12 @@ class DatabaseManager:
             )
             
             conn.commit()
-            return cursor.rowcount > 0
+            logger.info(f"成功删除任务 ID: {task_id}")
+            return True
+        except sqlite3.Error as e:
+            logger.error(f"删除任务错误 ID: {task_id}, 错误: {str(e)}")
+            conn.rollback()
+            raise
         finally:
             self.close()
     
@@ -196,6 +248,10 @@ class DatabaseManager:
             self.update_task_status(task_id, TASK_STATUS_COMPLETED)
             
             return cursor.lastrowid  # 返回新创建结果的ID
+        except sqlite3.Error as e:
+            logger.error(f"创建结果错误: {str(e)}")
+            conn.rollback()
+            raise
         finally:
             self.close()
     
@@ -212,6 +268,9 @@ class DatabaseManager:
             )
             result = cursor.fetchone()
             return dict(result) if result else None
+        except sqlite3.Error as e:
+            logger.error(f"获取结果错误: {str(e)}")
+            raise
         finally:
             self.close()
     
@@ -228,6 +287,9 @@ class DatabaseManager:
             )
             results = cursor.fetchall()
             return [dict(result) for result in results]
+        except sqlite3.Error as e:
+            logger.error(f"获取任务结果错误: {str(e)}")
+            raise
         finally:
             self.close()
     
@@ -244,8 +306,137 @@ class DatabaseManager:
             )
             conn.commit()
             return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logger.error(f"删除结果错误: {str(e)}")
+            conn.rollback()
+            raise
         finally:
             self.close()
+    
+    # 数据库维护操作
+    def vacuum_database(self):
+        """
+        整理数据库，回收删除的空间
+        """
+        conn = self.connect()
+        try:
+            conn.execute("VACUUM")
+            conn.commit()
+            logger.info("数据库整理完成")
+            return True
+        except sqlite3.Error as e:
+            logger.error(f"数据库整理错误: {str(e)}")
+            return False
+        finally:
+            self.close()
+    
+    def optimize_database(self):
+        """
+        优化数据库性能
+        """
+        conn = self.connect()
+        try:
+            conn.execute("PRAGMA optimize")
+            conn.commit()
+            logger.info("数据库优化完成")
+            return True
+        except sqlite3.Error as e:
+            logger.error(f"数据库优化错误: {str(e)}")
+            return False
+        finally:
+            self.close()
+    
+    def clear_cache(self):
+        """
+        清理数据库缓存文件
+        """
+        try:
+            # 关闭所有连接
+            self.close()
+            
+            # 获取WAL和SHM文件路径
+            db_path = Path(self.db_path)
+            wal_file = db_path.with_suffix(db_path.suffix + "-wal")
+            shm_file = db_path.with_suffix(db_path.suffix + "-shm")
+            
+            # 删除WAL和SHM文件
+            if wal_file.exists():
+                wal_file.unlink()
+                logger.info(f"已删除WAL文件: {wal_file}")
+            
+            if shm_file.exists():
+                shm_file.unlink()
+                logger.info(f"已删除SHM文件: {shm_file}")
+            
+            logger.info("数据库缓存清理完成")
+            return True
+        except Exception as e:
+            logger.error(f"清理数据库缓存错误: {str(e)}")
+            return False
+    
+    def reset_database(self):
+        """
+        重置数据库（删除并重新创建）
+        警告：此操作将删除所有数据！
+        """
+        try:
+            # 关闭所有连接
+            self.close()
+            
+            # 获取数据库文件路径
+            db_path = Path(self.db_path)
+            wal_file = db_path.with_suffix(db_path.suffix + "-wal")
+            shm_file = db_path.with_suffix(db_path.suffix + "-shm")
+            
+            # 删除数据库文件
+            if db_path.exists():
+                db_path.unlink()
+                logger.info(f"已删除数据库文件: {db_path}")
+            
+            # 删除WAL和SHM文件
+            if wal_file.exists():
+                wal_file.unlink()
+                logger.info(f"已删除WAL文件: {wal_file}")
+            
+            if shm_file.exists():
+                shm_file.unlink()
+                logger.info(f"已删除SHM文件: {shm_file}")
+            
+            # 重新初始化数据库
+            self.initialize_db()
+            logger.info("数据库已重置")
+            return True
+        except Exception as e:
+            logger.error(f"重置数据库错误: {str(e)}")
+            return False
+    
+    def backup_database(self, backup_path=None):
+        """
+        备份数据库
+        
+        参数:
+            backup_path (str, optional): 备份文件路径，默认为数据库路径加上时间戳
+        
+        返回:
+            str: 备份文件路径
+        """
+        try:
+            # 关闭所有连接
+            self.close()
+            
+            # 设置默认备份路径
+            if backup_path is None:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                db_path = Path(self.db_path)
+                backup_path = str(db_path.with_name(f"{db_path.stem}_backup_{timestamp}{db_path.suffix}"))
+            
+            # 复制数据库文件
+            shutil.copy2(self.db_path, backup_path)
+            logger.info(f"数据库已备份到: {backup_path}")
+            return backup_path
+        except Exception as e:
+            logger.error(f"备份数据库错误: {str(e)}")
+            return None
     
     def __enter__(self):
         """上下文管理器入口"""

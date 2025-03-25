@@ -6,6 +6,7 @@
 import os
 import logging
 import time
+import traceback
 from datetime import datetime
 from database.models import TASK_STATUS_PENDING, TASK_STATUS_PROCESSING, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED
 from database.db_manager import DatabaseManager  # 修改为使用DatabaseManager
@@ -29,20 +30,21 @@ class TaskService:
         os.makedirs(self.download_dir, exist_ok=True)
         os.makedirs(self.result_dir, exist_ok=True)
     
-    def create_task(self, url, ocr_engine="local"):
+    def create_task(self, url=None, file_path=None, ocr_engine="local"):
         """
         创建新任务
         
         参数:
-            url (str): 图片或PDF的URL
+            url (str, optional): 图片或PDF的URL
+            file_path (str, optional): 本地文件路径
             ocr_engine (str): OCR引擎类型，可选值: "local"(本地PaddleOCR) 或 "mistral"(Mistral AI)
             
         返回:
             int: 任务ID
         """
         # 创建任务记录
-        task_id = self.db_manager.create_task(url=url, ocr_engine=ocr_engine)  # 确保传递ocr_engine参数
-        logger.info(f"创建任务 ID: {task_id}, URL: {url}, OCR引擎: {ocr_engine}")
+        task_id = self.db_manager.create_task(url=url, file_path=file_path, ocr_engine=ocr_engine)
+        logger.info(f"创建任务 ID: {task_id}, URL: {url}, 文件路径: {file_path}, OCR引擎: {ocr_engine}")
         return task_id
     
     def process_task(self, task_id):
@@ -61,24 +63,26 @@ class TaskService:
             logger.error(f"任务不存在: {task_id}")
             return False
         
-        url = task["url"]
+        url = task.get("url")
+        file_path = task.get("file_path")
         ocr_engine = task.get("ocr_engine", "local")
         
         # 更新任务状态为处理中
         self.db_manager.update_task_status(task_id, TASK_STATUS_PROCESSING)  # 使用db_manager更新状态
         
         try:
-            # 下载文件
-            logger.info(f"开始下载: {url}")
-            file_path = self.downloader.download_file(url)
-            
-            if not file_path:
-                error_msg = "下载失败"
-                logger.error(f"下载失败: {error_msg}")
-                self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)  # 使用db_manager更新状态
-                return False
-            
-            self.db_manager.update_task_file_path(task_id, file_path)  # 使用db_manager更新文件路径
+            # 如果有URL但没有文件路径，则下载文件
+            if url and not file_path:
+                logger.info(f"开始下载: {url}")
+                file_path = self.downloader.download_file(url)
+                
+                if not file_path:
+                    error_msg = "下载失败"
+                    logger.error(f"下载失败: {error_msg}")
+                    self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)  # 使用db_manager更新状态
+                    return False
+                
+                self.db_manager.update_task_file_path(task_id, file_path)  # 使用db_manager更新文件路径
             
             # 创建OCR服务实例
             ocr_service = OCRFactory.create_ocr_service(service_type=ocr_engine, result_dir=self.result_dir)
@@ -99,12 +103,14 @@ class TaskService:
             
             self.db_manager.create_result(task_id, text_content, result_path)  # 使用db_manager创建结果
             
+            # 更新任务状态为已完成
+            self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
+            
             logger.info(f"任务完成: {task_id}")
             return True
             
         except Exception as e:
             logger.error(f"处理任务时出错: {str(e)}")
-            import traceback
             logger.error(traceback.format_exc())
             self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, str(e))  # 使用db_manager更新状态
             return False
@@ -120,4 +126,50 @@ class TaskService:
     def get_task_result(self, task_id):
         """获取任务结果"""
         results = self.db_manager.get_results_by_task(task_id)  # 使用db_manager获取结果
-        return results[0] if results else None  # 返回第一个结果 
+        return results[0] if results else None  # 返回第一个结果
+    
+    def delete_task(self, task_id):
+        """
+        删除单个任务
+        
+        参数:
+            task_id (int): 任务ID
+            
+        返回:
+            bool: 删除是否成功
+        """
+        try:
+            logger.info(f"尝试删除任务: {task_id}")
+            result = self.db_manager.delete_task(task_id)
+            logger.info(f"删除任务结果: {result}, 任务ID: {task_id}")
+            return result
+        except Exception as e:
+            logger.error(f"删除任务 {task_id} 失败: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False
+    
+    def delete_all_tasks(self):
+        """
+        删除所有任务
+        
+        返回:
+            int: 删除的任务数量
+        """
+        tasks = self.db_manager.get_all_tasks()
+        count = 0
+        
+        for task in tasks:
+            try:
+                logger.info(f"尝试删除任务: {task['id']}")
+                result = self.db_manager.delete_task(task['id'])
+                if result:
+                    count += 1
+                    logger.info(f"成功删除任务: {task['id']}")
+                else:
+                    logger.warning(f"删除任务失败: {task['id']}")
+            except Exception as e:
+                logger.error(f"删除任务 {task['id']} 出现异常: {str(e)}")
+                logger.error(traceback.format_exc())
+        
+        logger.info(f"已删除 {count}/{len(tasks)} 个任务")
+        return count 

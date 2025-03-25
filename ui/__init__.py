@@ -3,7 +3,7 @@ UI模块
 提供Streamlit界面组件
 """
 
-from ui.home_page import render as render_home
-from ui.task_page import render as render_tasks
+# 不要在这里导入具体的UI模块，避免循环导入
+# 如果需要导出函数，可以在这里定义空的__all__列表
 
-__all__ = ['render_home', 'render_tasks']
+__all__ = []

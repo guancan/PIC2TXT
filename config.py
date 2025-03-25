@@ -1,26 +1,35 @@
 """
 配置文件
-集中管理应用配置
+包含应用程序的全局配置
 """
 
 import os
+from pathlib import Path
+from dotenv import load_dotenv  # 导入dotenv库
 
-# 路径配置
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-DOWNLOAD_DIR = os.path.join(DATA_DIR, "downloads")
-RESULT_DIR = os.path.join(DATA_DIR, "results")
-DB_PATH = os.path.join(BASE_DIR, "database.db")
+# 加载.env文件中的环境变量
+load_dotenv()  # 这会自动查找项目根目录下的.env文件并加载其中的变量
 
-# 确保目录存在
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+# 基础路径配置
+BASE_DIR = Path(__file__).resolve().parent
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+RESULT_DIR = os.path.join(BASE_DIR, "data/results")
+DOWNLOAD_DIR = os.path.join(BASE_DIR, "data/downloads")
+
+# 确保必要的目录存在
+os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(RESULT_DIR, exist_ok=True)
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # OCR引擎配置
-DEFAULT_OCR_ENGINE = "local"  # 默认使用本地引擎
+DEFAULT_OCR_ENGINE = "easyocr"  # 默认OCR引擎
 
-# API配置
+# Mistral AI API配置
+# 从环境变量中获取API密钥
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
+
+# 其他OCR服务配置
+# ...
 
 # 日志配置
 LOG_LEVEL = "INFO"

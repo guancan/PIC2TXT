@@ -10,6 +10,7 @@ from services.download_service import DownloadService
 from services.ocr_factory import OCRFactory
 from services.task_service import TaskService
 import config
+from database.models import OCR_ENGINE_LOCAL, OCR_ENGINE_MISTRAL, OCR_ENGINE_NLP
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -25,13 +26,25 @@ def show_home_page():
     # URL输入 - 修改为文本区域，支持多行输入
     urls_input = st.text_area("输入图片或PDF的URL（每行一个URL）", height=150)
     
-    # OCR引擎选择 - 设置默认值为"mistral"
-    ocr_engine = st.selectbox(
-        "选择OCR引擎",
-        ["local", "mistral"],
-        index=1,  # 默认选中mistral
-        format_func=lambda x: "本地PaddleOCR" if x == "local" else "Mistral AI OCR"
+    # 添加处理模式选择
+    process_mode = st.radio(
+        "选择处理模式",
+        ["OCR识别", "自然语言分析"],
+        index=0,
+        help="OCR识别：提取图片中的文字内容；自然语言分析：使用AI分析并描述图片内容"
     )
+    
+    # OCR引擎选择 - 根据处理模式调整选项
+    if process_mode == "OCR识别":
+        ocr_engine = st.selectbox(
+            "选择OCR引擎",
+            [OCR_ENGINE_LOCAL, OCR_ENGINE_MISTRAL],
+            index=1,  # 默认选中mistral
+            format_func=lambda x: "本地PaddleOCR" if x == OCR_ENGINE_LOCAL else "Mistral AI OCR"
+        )
+    else:  # 自然语言分析模式
+        ocr_engine = OCR_ENGINE_NLP
+        st.info("自然语言分析模式将使用Mistral AI进行图片内容的智能分析")
     
     if st.button("开始处理"):
         if not urls_input:
@@ -82,7 +95,10 @@ def show_home_page():
                             result = task_service.get_task_result(task_ids[0])
                             if result:
                                 with st.expander("识别结果", expanded=True):
-                                    st.text_area("文本内容", result["text_content"], height=300)
+                                    if process_mode == "自然语言分析":
+                                        st.markdown(result["text_content"])
+                                    else:
+                                        st.text_area("文本内容", result["text_content"], height=300)
                                     
                                     # 提供下载链接
                                     if os.path.exists(result["result_path"]):
@@ -129,7 +145,10 @@ def show_home_page():
                         
                         # 显示结果
                         with st.expander("识别结果", expanded=True):
-                            st.text_area("文本内容", result["text_content"], height=300)
+                            if process_mode == "自然语言分析":
+                                st.markdown(result["text_content"])
+                            else:
+                                st.text_area("文本内容", result["text_content"], height=300)
                             
                             # 提供下载链接
                             if os.path.exists(result["result_path"]):

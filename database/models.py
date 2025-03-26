@@ -1,6 +1,6 @@
 """
 数据库模型定义
-定义任务表和结果表的结构
+定义任务表、结果表、数据源表和笔记任务关联表的结构
 """
 
 # 任务状态常量
@@ -37,5 +37,29 @@ CREATE TABLE IF NOT EXISTS results (
     result_path TEXT,                 -- 结果文件路径
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
     FOREIGN KEY (task_id) REFERENCES tasks (id)
+);
+"""
+
+# 创建数据源表的SQL语句
+CREATE_DATA_SOURCES_TABLE = """
+CREATE TABLE IF NOT EXISTS data_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type TEXT,                 -- 数据源类型：csv, database, api
+    source_path TEXT,                 -- 数据源路径或连接字符串
+    config TEXT,                      -- 数据源配置（JSON格式）
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP   -- 更新时间
+);
+"""
+
+# 创建笔记任务关联表的SQL语句
+CREATE_NOTE_TASK_RELATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS note_task_relations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_url TEXT UNIQUE,             -- 笔记URL（作为唯一标识）
+    task_ids TEXT,                    -- 关联的任务ID列表（JSON格式）
+    status TEXT,                      -- 状态：pending, processing, completed, failed
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP   -- 更新时间
 );
 """

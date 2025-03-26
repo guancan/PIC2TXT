@@ -13,6 +13,8 @@ from pathlib import Path
 from database.models import (
     CREATE_TASKS_TABLE, 
     CREATE_RESULTS_TABLE,
+    CREATE_DATA_SOURCES_TABLE,
+    CREATE_NOTE_TASK_RELATIONS_TABLE,
     TASK_STATUS_PENDING,
     TASK_STATUS_PROCESSING,
     TASK_STATUS_COMPLETED,
@@ -84,6 +86,10 @@ class DatabaseManager:
             conn.execute(CREATE_TASKS_TABLE)
             # 创建结果表
             conn.execute(CREATE_RESULTS_TABLE)
+            # 创建数据源表
+            conn.execute(CREATE_DATA_SOURCES_TABLE)
+            # 创建笔记任务关联表
+            conn.execute(CREATE_NOTE_TASK_RELATIONS_TABLE)
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"初始化数据库错误: {str(e)}")
@@ -636,6 +642,49 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"修复数据库失败: {str(e)}")
             return False
+        finally:
+            self.close()
+    
+    def execute_query(self, query, params=None):
+        """
+        执行任意SQL查询
+        
+        参数:
+            query (str): SQL查询语句
+            params (tuple, optional): 查询参数
+            
+        返回:
+            list: 查询结果列表，每个元素是一个字典
+        """
+        conn = self.connect()
+        try:
+            cursor = conn.cursor()
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+                
+            # 如果是SELECT查询，返回结果
+            if query.strip().upper().startswith("SELECT"):
+                results = cursor.fetchall()
+                result_list = [dict(row) for row in results]
+                return result_list
+            # 如果是INSERT查询并且有RETURNING子句，返回结果
+            elif "RETURNING" in query.upper():
+                results = cursor.fetchall()
+                result_list = [dict(row) for row in results]
+                conn.commit()
+                return result_list
+            # 否则提交事务并返回空列表
+            else:
+                conn.commit()
+                return []
+        except sqlite3.Error as e:
+            logger.error(f"执行查询错误: {str(e)}")
+            logger.error(f"查询: {query}")
+            logger.error(f"参数: {params}")
+            conn.rollback()
+            raise
         finally:
             self.close()
     

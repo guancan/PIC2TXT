@@ -25,7 +25,7 @@ st.set_page_config(
 
 # 侧边栏导航
 st.sidebar.title("功能菜单")
-page = st.sidebar.radio("选择功能", ["提交任务", "任务管理", "查看结果"])
+page = st.sidebar.radio("选择功能", ["提交任务", "任务管理", "查看结果", "CSV处理"])
 
 # Mistral API密钥设置
 mistral_api_key = st.sidebar.text_input("Mistral API密钥", type="password")
@@ -41,6 +41,9 @@ elif page == "任务管理":
     show_task_page()
 elif page == "查看结果":
     show_result_page()
+elif page == "CSV处理":
+    from ui.csv_page import show_csv_page
+    show_csv_page()
 
 # 添加页脚
 st.sidebar.markdown("---")

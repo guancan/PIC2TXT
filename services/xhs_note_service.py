@@ -95,39 +95,32 @@ class XHSNoteService:
         try:
             # 获取笔记关联记录
             relation = self._get_note_relation(note_url)
-            logger.info(f"笔记关联记录: {relation}")
-            
             if not relation:
                 logger.warning(f"找不到笔记关联记录: {note_url}")
                 return ""
             
             # 获取任务ID列表
             task_ids = json.loads(relation["task_ids"]) if relation["task_ids"] else []
-            logger.info(f"笔记关联任务ID: {task_ids}")
-            
             if not task_ids:
                 logger.warning(f"笔记没有关联任务: {note_url}")
                 return ""
             
             # 获取所有任务的OCR结果
             results = []
-            for task_id in task_ids:
+            for i, task_id in enumerate(task_ids):
                 result = self.task_service.get_task_result(task_id)
-                logger.info(f"任务 {task_id} 的OCR结果: {result}")
-                
                 if result and result.get("text_content"):
-                    results.append(result["text_content"])
-            
-            logger.info(f"所有OCR结果: {results}")
+                    # 添加图片标记
+                    image_text = f"[图片{i+1}的文本]\n{result['text_content']}\n[图片{i+1}文本结束]"
+                    results.append(image_text)
             
             # 合并OCR结果
             if not results:
                 logger.warning(f"笔记没有OCR结果: {note_url}")
                 return ""
             
-            # 简单合并所有结果，每个结果之间添加两个换行符
+            # 合并所有结果，每个结果之间添加换行符
             combined_text = "\n\n".join(results)
-            logger.info(f"合并后的OCR结果长度: {len(combined_text)}")
             return combined_text
         except Exception as e:
             logger.error(f"获取笔记OCR结果时出错: {str(e)}")

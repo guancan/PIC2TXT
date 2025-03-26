@@ -30,6 +30,14 @@ env/
 data/downloads/
 data/results/
 
+# 数据库文件
+database.db
+database.db-shm
+database.db-wal
+*.db
+*.db-shm
+*.db-wal
+
 # 日志文件
 *.log
 
@@ -42,3 +50,7 @@ data/results/
 # 操作系统相关
 .DS_Store
 Thumbs.db
+
+# 临时文件
+temp/
+.temp/

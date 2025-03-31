@@ -97,36 +97,59 @@ def show_video_page():
         st.success(f"文件 '{uploaded_file.name}' 上传成功!")
     
     # 处理按钮
-    if st.button("处理上传的视频"):
+    if st.button("处理视频URL"):
         if not config.ALI_PARAFORMER_API_KEY:
             st.error("未设置阿里云Paraformer API密钥，无法处理视频")
+        elif not urls_input.strip():
+            st.error("请输入至少一个视频URL")
         else:
-            with st.spinner("正在提交视频处理任务..."):
-                try:
-                    # 创建任务 - 注意：这里需要更新task_service以支持视频任务
-                    # 准备参数字典
-                    params = {
-                        "language_hints": language_hints,
-                        "diarization_enabled": diarization_enabled
-                    }
-                    
-                    # 仅当启用说话人分离且指定了说话人数量时，添加speaker_count参数
-                    if diarization_enabled and speaker_count:
-                        params["speaker_count"] = speaker_count
-                    
-                    # 创建视频任务
-                    task_id = task_service.create_video_task(
-                        file_path=file_path, 
-                        video_engine=video_engine,
-                        params=params
-                    )
-                    
-                    st.success("视频处理任务已提交!")
-                    st.info(f"任务ID: {task_id}")
-                    st.info("视频处理可能需要较长时间，请稍后在'任务管理'页面查看结果")
-                    
-                except Exception as e:
-                    st.error(f"提交任务异常: {str(e)}")
+            # 分割多行URL输入
+            urls = [url.strip() for url in urls_input.split('\n') if url.strip()]
+            
+            if not urls:
+                st.error("未检测到有效的URL")
+            else:
+                with st.spinner("正在提交视频处理任务..."):
+                    try:
+                        # 准备参数字典
+                        params = {
+                            "language_hints": language_hints,
+                            "diarization_enabled": diarization_enabled
+                        }
+                        
+                        # 仅当启用说话人分离且指定了说话人数量时，添加speaker_count参数
+                        if diarization_enabled and speaker_count:
+                            params["speaker_count"] = speaker_count
+                        
+                        # 处理每个URL
+                        task_ids = []
+                        for url in urls:
+                            # 验证URL
+                            from utils.video_utils import is_valid_video_url
+                            if not is_valid_video_url(url):
+                                st.warning(f"URL格式不正确或不支持: {url}")
+                                continue
+                            
+                            # 创建视频任务
+                            task_id = task_service.create_video_task(
+                                url=url, 
+                                video_engine=video_engine,
+                                params=params
+                            )
+                            task_ids.append(task_id)
+                            
+                            # 可选：立即开始处理任务
+                            # task_service.process_video_task(task_id)
+                        
+                        if task_ids:
+                            st.success(f"已提交 {len(task_ids)} 个视频处理任务!")
+                            st.info(f"任务ID: {', '.join(map(str, task_ids))}")
+                            st.info("视频处理可能需要较长时间，请稍后在'任务管理'页面查看结果")
+                        else:
+                            st.error("没有成功提交任何任务")
+                        
+                    except Exception as e:
+                        st.error(f"提交任务异常: {str(e)}")
     
     # 任务状态查询部分
     st.subheader("查询任务状态")

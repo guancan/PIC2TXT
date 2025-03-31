@@ -99,21 +99,21 @@ class DatabaseManager:
             self.close()
     
     # 任务相关操作
-    def create_task(self, url=None, file_path=None, ocr_engine="local"):
+    def create_task(self, url=None, file_path=None, task_type="image", ocr_engine="local", video_engine=None):
         """创建新任务"""
         conn = self.connect()
         try:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO tasks (url, file_path, status, ocr_engine)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO tasks (url, file_path, status, task_type, ocr_engine, video_engine)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (url, file_path, TASK_STATUS_PENDING, ocr_engine)
+                (url, file_path, TASK_STATUS_PENDING, task_type, ocr_engine, video_engine)
             )
             conn.commit()
             task_id = cursor.lastrowid
-            logger.info(f"成功创建任务 ID: {task_id}")
+            logger.info(f"成功创建任务 ID: {task_id}, 类型: {task_type}")
             return task_id  # 返回新创建任务的ID
         except sqlite3.Error as e:
             logger.error(f"创建任务错误: {str(e)}")

@@ -14,14 +14,23 @@ OCR_ENGINE_LOCAL = 'local'           # 本地PaddleOCR
 OCR_ENGINE_MISTRAL = 'mistral'       # Mistral AI OCR
 OCR_ENGINE_NLP = 'nlp'               # 新增自然语言分析引擎类型
 
+# 添加任务类型常量
+TASK_TYPE_IMAGE = 'image'
+TASK_TYPE_VIDEO = 'video'
+
+# 添加视频引擎类型常量
+VIDEO_ENGINE_ALI_PARAFORMER = 'ali_paraformer_v2'
+
 # 创建任务表的SQL语句
 CREATE_TASKS_TABLE = """
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    url TEXT,                         -- 图片/PDF的URL
+    url TEXT,                         -- 图片/PDF/视频的URL
     file_path TEXT,                   -- 本地文件路径
     status TEXT,                      -- 状态：pending, processing, completed, failed
+    task_type TEXT DEFAULT 'image',   -- 任务类型：image, video
     ocr_engine TEXT DEFAULT 'local',  -- OCR引擎类型：local, mistral, nlp
+    video_engine TEXT,                -- 视频引擎类型：ali_paraformer_v2
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 更新时间
     error_message TEXT                -- 错误信息（如果有）
@@ -34,6 +43,7 @@ CREATE TABLE IF NOT EXISTS results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER,                  -- 关联的任务ID
     text_content TEXT,                -- OCR识别的文本内容
+    video_text TEXT,                  -- 视频字幕识别的文本内容
     result_path TEXT,                 -- 结果文件路径
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
     FOREIGN KEY (task_id) REFERENCES tasks (id)
@@ -58,6 +68,7 @@ CREATE TABLE IF NOT EXISTS note_task_relations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     note_url TEXT UNIQUE,             -- 笔记URL（作为唯一标识）
     task_ids TEXT,                    -- 关联的任务ID列表（JSON格式）
+    video_task_ids TEXT,              -- 关联的视频任务ID列表（JSON格式）
     status TEXT,                      -- 状态：pending, processing, completed, failed
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP   -- 更新时间

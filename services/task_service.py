@@ -9,10 +9,11 @@ import time
 import traceback
 import random
 from datetime import datetime
-from database.models import TASK_STATUS_PENDING, TASK_STATUS_PROCESSING, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED
+from database.models import TASK_STATUS_PENDING, TASK_STATUS_PROCESSING, TASK_STATUS_COMPLETED, TASK_STATUS_FAILED, TASK_TYPE_IMAGE, TASK_TYPE_VIDEO, VIDEO_ENGINE_ALI_PARAFORMER
 from database.db_manager import DatabaseManager  # 修改为使用DatabaseManager
 from services.download_service import DownloadService  # 更新导入名称
 from services.ocr_factory import OCRFactory
+from services.video_service import VideoService
 import config
 import uuid
 
@@ -27,6 +28,7 @@ class TaskService:
         self.result_dir = result_dir or config.RESULT_DIR
         self.db_manager = DatabaseManager(config.DB_PATH)  # 使用DatabaseManager
         self.downloader = DownloadService(self.download_dir)
+        self.video_service = VideoService(self.result_dir)  # 添加视频服务
         
         # 添加任务处理的频率控制
         self.last_task_time = 0
@@ -230,3 +232,152 @@ class TaskService:
         
         logger.info(f"已删除 {count}/{len(tasks)} 个任务")
         return count
+
+    def create_video_task(self, url=None, file_path=None, video_engine=VIDEO_ENGINE_ALI_PARAFORMER, params=None):
+        """
+        创建视频处理任务
+        
+        参数:
+            url (str, optional): 视频URL
+            file_path (str, optional): 本地视频文件路径
+            video_engine (str): 视频处理引擎类型
+            params (dict): 视频处理参数
+            
+        返回:
+            int: 任务ID
+        """
+        # 创建任务记录
+        task_id = self.db_manager.create_task(
+            url=url, 
+            file_path=file_path, 
+            task_type=TASK_TYPE_VIDEO,
+            video_engine=video_engine
+        )
+        logger.info(f"创建视频任务 ID: {task_id}, URL: {url}, 文件路径: {file_path}, 视频引擎: {video_engine}")
+        
+        # 如果需要立即处理，可以在这里调用process_video_task方法
+        
+        return task_id
+
+    def process_video_task(self, task_id):
+        """
+        处理视频任务
+        
+        参数:
+            task_id (int): 任务ID
+            
+        返回:
+            bool: 处理是否成功
+        """
+        # 获取任务信息
+        task = self.db_manager.get_task(task_id)
+        if not task:
+            logger.error(f"任务不存在: {task_id}")
+            return False
+        
+        url = task.get("url")
+        file_path = task.get("file_path")
+        video_engine = task.get("video_engine")
+        params = task.get("params")
+        
+        # 更新任务状态为处理中
+        self.db_manager.update_task_status(task_id, TASK_STATUS_PROCESSING)
+        
+        # 控制任务处理频率
+        self._wait_for_rate_limit()
+        
+        # 添加重试逻辑
+        retry_count = 0
+        retry_delay = 2  # 初始重试延迟（秒）
+        
+        while retry_count <= self.max_retries:
+            try:
+                # 如果有URL但没有文件路径，则下载文件
+                if url and not file_path:
+                    logger.info(f"开始下载视频: {url}")
+                    
+                    # 检查是否是小红书URL
+                    if 'xiaohongshu.com' in url or 'xhscdn.com' in url:
+                        logger.info(f"检测到小红书视频URL: {url}")
+                        # 小红书视频需要特殊处理，直接传递URL给视频服务
+                        video_result = self.video_service.process_video(url, params)
+                    else:
+                        # 其他视频尝试下载
+                        file_path = self.downloader.download_file(url)
+                        
+                        if not file_path:
+                            error_msg = "下载视频失败"
+                            logger.error(f"下载失败: {error_msg}")
+                            self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                            return False
+                        
+                        self.db_manager.update_task_file_path(task_id, file_path)
+                    
+                    # 处理视频
+                    logger.info(f"开始处理视频: {file_path}")
+                    video_result = self.video_service.process_video(file_path, params)
+                
+                if not video_result["success"]:
+                    error_msg = video_result.get("error", "未知错误")
+                    logger.error(f"视频处理失败: {error_msg}")
+                    
+                    # 如果是API频率限制或网络错误，尝试重试
+                    if "频率限制" in error_msg or "请求过于频繁" in error_msg:
+                        retry_count += 1
+                        if retry_count > self.max_retries:
+                            logger.error(f"达到最大重试次数 ({self.max_retries})，任务失败")
+                            self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                            return False
+                        
+                        wait_time = retry_delay * (1 + random.random())
+                        logger.warning(f"任务处理失败，等待 {wait_time:.2f} 秒后重试 ({retry_count}/{self.max_retries})")
+                        time.sleep(wait_time)
+                        retry_delay *= 2  # 指数退避
+                        continue
+                    else:
+                        # 其他错误直接失败
+                        self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                        return False
+                
+                # 保存处理结果
+                text_content = video_result["text_content"]
+                result_path = video_result["result_path"]
+                
+                self.db_manager.create_result(task_id, text_content, result_path)
+                
+                # 更新任务状态为已完成
+                self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
+                
+                logger.info(f"视频任务完成: {task_id}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"处理视频任务时出错: {str(e)}")
+                logger.error(traceback.format_exc())
+                
+                # 尝试重试
+                retry_count += 1
+                if retry_count > self.max_retries:
+                    logger.error(f"达到最大重试次数 ({self.max_retries})，任务失败")
+                    self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, str(e))
+                    return False
+                
+                wait_time = retry_delay * (1 + random.random())
+                logger.warning(f"任务处理出错，等待 {wait_time:.2f} 秒后重试 ({retry_count}/{self.max_retries})")
+                time.sleep(wait_time)
+                retry_delay *= 2  # 指数退避
+        
+        # 如果执行到这里，说明所有重试都失败了
+        self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, "达到最大重试次数后仍然失败")
+        return False
+
+    def get_task_status(self, task_id):
+        """获取任务状态信息"""
+        task = self.db_manager.get_task(task_id)
+        if not task:
+            return None
+        
+        return {
+            "status": task.get("status"),
+            "error_message": task.get("error_message")
+        }

@@ -240,15 +240,15 @@ class VideoService:
         """
         try:
             # 查询任务状态
-            status_response = Transcription.get_task(task=ali_task_id)
+            status_response = Transcription.fetch(task=ali_task_id)
             
             if status_response.status_code == HTTPStatus.OK:
-                status = status_response.output.get('status', 'UNKNOWN')
-                logger.info(f"任务 {ali_task_id} 状态: {status}")
+                task_status = status_response.output.task_status
+                logger.info(f"任务 {ali_task_id} 状态: {task_status}")
                 
                 return {
                     "success": True,
-                    "status": status,
+                    "status": task_status,
                     "details": status_response.output
                 }
             else:
@@ -265,4 +265,4 @@ class VideoService:
             return {
                 "success": False,
                 "error": error_msg
-            } 
+            }

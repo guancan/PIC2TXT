@@ -207,6 +207,37 @@ def show_task_page():
     # 显示数据库维护选项
     show_database_maintenance()
 
+    # 在任务列表中添加"开始处理"按钮
+    for task in tasks:
+        # 显示任务信息
+        col1, col2, col3, col4, col5 = st.columns([1, 2, 3, 2, 2])
+        with col1:
+            st.write(task["id"])
+        with col2:
+            st.write(task["status"])
+        with col3:
+            st.write(task["url"] or "本地文件")
+        with col4:
+            st.write(task["created_at"])
+        with col5:
+            # 如果任务状态是pending，显示"开始处理"按钮
+            if task["status"] == "pending":
+                if st.button("开始处理", key=f"process_{task['id']}"):
+                    with st.spinner(f"正在处理任务 {task['id']}..."):
+                        # 根据任务类型调用不同的处理方法
+                        if task.get("task_type") == "video":
+                            success = task_service.process_video_task(task["id"])
+                        else:
+                            success = task_service.process_task(task["id"])
+                        
+                        if success:
+                            st.success("处理成功!")
+                        else:
+                            st.error("处理失败，请查看日志")
+                        
+                        # 刷新页面
+                        st.experimental_rerun()
+
 def show_database_maintenance():
     """显示数据库维护选项"""
     st.subheader("数据库维护")

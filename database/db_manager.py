@@ -36,47 +36,30 @@ class DatabaseManager:
     
     def connect(self):
         """连接到数据库"""
-        try:
-            # 如果已经有连接，先关闭
-            if self.conn:
-                self.close()
-                
-            # 确保数据库目录存在
-            db_dir = os.path.dirname(os.path.abspath(self.db_path))
-            if not os.path.exists(db_dir):
-                os.makedirs(db_dir, exist_ok=True)
-                
-            # 连接数据库
-            self.conn = sqlite3.connect(self.db_path, timeout=20)
-            
-            # 启用外键约束
-            self.conn.execute("PRAGMA foreign_keys = ON")
-            # 设置超时时间
-            self.conn.execute("PRAGMA busy_timeout = 10000")
-            # 设置同步模式为NORMAL (1)，提高性能
-            self.conn.execute("PRAGMA synchronous = 1")
-            # 设置日志模式为WAL，提高性能和可靠性
-            self.conn.execute("PRAGMA journal_mode = WAL")
-            # 设置缓存大小
-            self.conn.execute("PRAGMA cache_size = 10000")
-            
-            self.conn.row_factory = sqlite3.Row  # 使查询结果可以通过列名访问
-            self.cursor = self.conn.cursor()
-            return self.conn
-        except sqlite3.Error as e:
-            logger.error(f"数据库连接错误: {str(e)}")
-            raise
+        if not hasattr(self, '_local'):
+            import threading
+            self._local = threading.local()
+        
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            try:
+                self._local.conn = sqlite3.connect(self.db_path)
+                self._local.conn.row_factory = sqlite3.Row
+                self._local.conn.execute("PRAGMA journal_mode = WAL")
+                self._local.conn.execute("PRAGMA foreign_keys = ON")
+                return self._local.conn
+            except sqlite3.Error as e:
+                logger.error(f"数据库连接错误: {str(e)}")
+                raise
+        return self._local.conn
     
     def close(self):
         """关闭数据库连接"""
-        if self.conn:
+        if hasattr(self, '_local') and hasattr(self._local, 'conn') and self._local.conn:
             try:
-                self.conn.close()
+                self._local.conn.close()
+                self._local.conn = None
             except sqlite3.Error as e:
                 logger.error(f"关闭数据库连接错误: {str(e)}")
-            finally:
-                self.conn = None
-                self.cursor = None
     
     def initialize_db(self):
         """初始化数据库，创建必要的表"""

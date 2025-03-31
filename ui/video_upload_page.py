@@ -138,13 +138,21 @@ def show_video_page():
                             )
                             task_ids.append(task_id)
                             
-                            # 可选：立即开始处理任务
-                            # task_service.process_video_task(task_id)
+                            # 立即开始处理任务
+                            st.info(f"开始处理任务 ID: {task_id}...")
+                            # 使用后台线程处理任务，避免阻塞UI
+                            import threading
+                            thread = threading.Thread(
+                                target=task_service.process_video_task,
+                                args=(task_id,)
+                            )
+                            thread.daemon = True
+                            thread.start()
                         
                         if task_ids:
                             st.success(f"已提交 {len(task_ids)} 个视频处理任务!")
                             st.info(f"任务ID: {', '.join(map(str, task_ids))}")
-                            st.info("视频处理可能需要较长时间，请稍后在'任务管理'页面查看结果")
+                            st.info("视频处理已在后台开始，可能需要较长时间，请稍后在'任务管理'页面查看结果")
                         else:
                             st.error("没有成功提交任何任务")
                         

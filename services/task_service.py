@@ -260,38 +260,25 @@ class TaskService:
         return task_id
 
     def process_video_task(self, task_id):
-        """
-        处理视频任务
-        
-        参数:
-            task_id (int): 任务ID
-            
-        返回:
-            bool: 处理是否成功
-        """
-        # 获取任务信息
-        task = self.db_manager.get_task(task_id)
-        if not task:
-            logger.error(f"任务不存在: {task_id}")
-            return False
-        
-        url = task.get("url")
-        file_path = task.get("file_path")
-        video_engine = task.get("video_engine")
-        params = task.get("params")
-        
-        # 更新任务状态为处理中
-        self.db_manager.update_task_status(task_id, TASK_STATUS_PROCESSING)
-        
-        # 控制任务处理频率
-        self._wait_for_rate_limit()
-        
-        # 添加重试逻辑
+        """处理视频任务"""
         retry_count = 0
         retry_delay = 2  # 初始重试延迟（秒）
         
         while retry_count <= self.max_retries:
             try:
+                # 获取任务信息
+                task = self.db_manager.get_task(task_id)
+                if not task:
+                    logger.error(f"未找到任务 ID: {task_id}")
+                    return False
+                
+                # 更新任务状态为处理中
+                self.db_manager.update_task_status(task_id, TASK_STATUS_PROCESSING)
+                
+                url = task.get("url")
+                file_path = task.get("file_path")
+                params = task.get("params", {})
+                
                 # 如果有URL但没有文件路径，则下载文件
                 if url and not file_path:
                     logger.info(f"开始下载视频: {url}")
@@ -301,6 +288,26 @@ class TaskService:
                         logger.info(f"检测到小红书视频URL: {url}")
                         # 小红书视频需要特殊处理，直接传递URL给视频服务
                         video_result = self.video_service.process_video(url, params)
+                        
+                        # 处理结果
+                        if video_result.get("success"):
+                            # 保存处理结果
+                            text_content = video_result.get("text_content", "")
+                            result_path = video_result.get("result_path", "")
+                            
+                            self.db_manager.create_result(task_id, text_content, result_path)
+                            
+                            # 更新任务状态为已完成
+                            self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
+                            
+                            logger.info(f"视频任务完成: {task_id}")
+                            return True
+                        else:
+                            # 处理失败
+                            error_msg = video_result.get("error", "未知错误")
+                            logger.error(f"视频处理失败: {error_msg}")
+                            self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                            return False
                     else:
                         # 其他视频尝试下载
                         file_path = self.downloader.download_file(url)
@@ -312,44 +319,38 @@ class TaskService:
                             return False
                         
                         self.db_manager.update_task_file_path(task_id, file_path)
-                    
-                    # 处理视频
+                
+                # 如果有文件路径，则处理视频
+                if file_path:
                     logger.info(f"开始处理视频: {file_path}")
                     video_result = self.video_service.process_video(file_path, params)
-                
-                if not video_result["success"]:
-                    error_msg = video_result.get("error", "未知错误")
-                    logger.error(f"视频处理失败: {error_msg}")
                     
-                    # 如果是API频率限制或网络错误，尝试重试
-                    if "频率限制" in error_msg or "请求过于频繁" in error_msg:
-                        retry_count += 1
-                        if retry_count > self.max_retries:
-                            logger.error(f"达到最大重试次数 ({self.max_retries})，任务失败")
-                            self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
-                            return False
+                    # 处理结果
+                    if video_result.get("success"):
+                        # 保存处理结果
+                        text_content = video_result.get("text_content", "")
+                        result_path = video_result.get("result_path", "")
                         
-                        wait_time = retry_delay * (1 + random.random())
-                        logger.warning(f"任务处理失败，等待 {wait_time:.2f} 秒后重试 ({retry_count}/{self.max_retries})")
-                        time.sleep(wait_time)
-                        retry_delay *= 2  # 指数退避
-                        continue
+                        self.db_manager.create_result(task_id, text_content, result_path)
+                        
+                        # 更新任务状态为已完成
+                        self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
+                        
+                        logger.info(f"视频任务完成: {task_id}")
+                        return True
                     else:
-                        # 其他错误直接失败
+                        # 处理失败
+                        error_msg = video_result.get("error", "未知错误")
+                        logger.error(f"视频处理失败: {error_msg}")
                         self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
                         return False
                 
-                # 保存处理结果
-                text_content = video_result["text_content"]
-                result_path = video_result["result_path"]
-                
-                self.db_manager.create_result(task_id, text_content, result_path)
-                
-                # 更新任务状态为已完成
-                self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
-                
-                logger.info(f"视频任务完成: {task_id}")
-                return True
+                # 如果既没有URL也没有文件路径，则报错
+                if not url and not file_path:
+                    error_msg = "任务没有URL或文件路径"
+                    logger.error(error_msg)
+                    self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                    return False
                 
             except Exception as e:
                 logger.error(f"处理视频任务时出错: {str(e)}")

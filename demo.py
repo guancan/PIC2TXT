@@ -22,7 +22,9 @@ try:
     task_response = dashscope.audio.asr.Transcription.async_call(
         model='paraformer-v2',
         file_urls=[video_url],
-        language_hints=['zh', 'en']  # 支持中文和英文混合识别
+        language_hints=['zh', 'en'],  # 支持中文和英文混合识别
+        diarization_enabled=True,     # 启用自动说话人分离
+        speaker_count=3               # 指定说话人数量参考值（2-100之间的整数）
     )
     
     task_id = task_response.output.task_id

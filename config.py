@@ -31,6 +31,9 @@ DEFAULT_OCR_ENGINE = "mistral"  # 默认OCR引擎
 # 从环境变量中获取API密钥
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
 
+# 阿里云Paraformer API配置
+ALI_PARAFORMER_API_KEY = os.environ.get("ALI_PARAFORMER_API_KEY", "")
+
 # 其他OCR服务配置
 # ...
 

@@ -16,6 +16,7 @@ from database.db_manager import DatabaseManager
 from services.task_service import TaskService
 from services.xhs_note_service import XHSNoteService
 import config
+from database.models import VIDEO_ENGINE_ALI_PARAFORMER
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

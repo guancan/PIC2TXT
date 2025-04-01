@@ -77,11 +77,13 @@ class XHSNoteService:
                 # 检查笔记URL是否可能是视频URL
                 if is_valid_video_url(note_url):
                     # 创建视频任务
-                    video_task_id = self.task_service.create_task(
-                        url=note_url, 
-                        ocr_engine=None,
-                        task_type=TASK_TYPE_VIDEO,
-                        video_engine=video_engine
+                    video_task_id = self.task_service.create_video_task(
+                        url=note_url,
+                        video_engine=video_engine,
+                        params={
+                            "language_hints": ["zh", "en"],
+                            "diarization_enabled": False
+                        }
                     )
                     if video_task_id > 0:
                         video_task_ids.append(video_task_id)
@@ -89,11 +91,13 @@ class XHSNoteService:
                 # 检查是否有视频URL字段
                 video_url = note_data.get("video_url", "")
                 if video_url and is_valid_video_url(video_url):
-                    video_task_id = self.task_service.create_task(
-                        url=video_url, 
-                        ocr_engine=None,
-                        task_type=TASK_TYPE_VIDEO,
-                        video_engine=video_engine
+                    video_task_id = self.task_service.create_video_task(
+                        url=video_url,
+                        video_engine=video_engine,
+                        params={
+                            "language_hints": ["zh", "en"],
+                            "diarization_enabled": False
+                        }
                     )
                     if video_task_id > 0:
                         video_task_ids.append(video_task_id)

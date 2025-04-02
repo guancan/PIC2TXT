@@ -9,6 +9,7 @@ import logging
 import traceback
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
+import threading
 
 from database.db_manager import DatabaseManager
 from services.task_service import TaskService
@@ -49,62 +50,46 @@ class XHSNoteService:
             Tuple[bool, str, List[int]]: (是否成功, 消息, 任务ID列表)
         """
         try:
-            # 提取笔记URL和图片列表
-            note_url = note_data.get("note_url")
+            # 获取笔记URL
+            note_url = note_data.get("note_url", "")
             if not note_url:
-                return False, "笔记URL不能为空", []
+                return False, "笔记URL为空", []
             
-            # 为笔记创建关联记录
-            relation_id = self._create_note_relation(note_url)
-            if relation_id < 0:
+            # 创建或获取笔记关联记录
+            relation_id = self._get_or_create_note_relation(note_url)
+            if relation_id <= 0:
                 return False, "创建笔记关联记录失败", []
             
-            task_ids = []
-            
             # 处理图片
-            image_list_str = note_data.get("image_list", "")
-            image_urls = extract_image_urls(image_list_str)
-            if image_urls:
-                # 为每个图片URL创建任务
+            task_ids = []
+            image_list = note_data.get("image_list", "")
+            if image_list:
+                image_urls = extract_image_urls(image_list)
                 for img_url in image_urls:
-                    task_id = self.task_service.create_task(url=img_url, ocr_engine=ocr_engine)
-                    if task_id > 0:
-                        task_ids.append(task_id)
+                    if img_url:
+                        # 创建OCR任务
+                        task_id = self.task_service.create_task(url=img_url, ocr_engine=ocr_engine)
+                        if task_id > 0:
+                            task_ids.append(task_id)
+                            # 立即处理任务
+                            self.task_service.process_task(task_id)
             
             # 处理视频
             video_task_ids = []
+            
             if process_video:
-                # 检查笔记URL是否可能是视频URL
-                if is_valid_video_url(note_url):
-                    # 创建视频任务
-                    video_task_id = self.task_service.create_video_task(
-                        url=note_url,
-                        video_engine=video_engine,
-                        params={
-                            "language_hints": ["zh", "en"],
-                            "diarization_enabled": False
-                        }
-                    )
-                    if video_task_id > 0:
-                        video_task_ids.append(video_task_id)
-                
-                # 检查是否有视频URL字段
+                # 只处理video_url字段中的视频，不处理note_url
                 video_url = note_data.get("video_url", "")
                 if video_url and is_valid_video_url(video_url):
+                    # 创建视频任务
                     video_task_id = self.task_service.create_video_task(
                         url=video_url,
                         video_engine=video_engine,
-                        params={
-                            "language_hints": ["zh", "en"],
-                            "diarization_enabled": False
-                        }
                     )
                     if video_task_id > 0:
                         video_task_ids.append(video_task_id)
-            
-            # 如果既没有图片任务也没有视频任务，则返回失败
-            if not task_ids and not video_task_ids:
-                return False, "没有找到有效的图片或视频URL", []
+                        # 立即处理视频任务
+                        self.task_service.process_video_task(video_task_id)
             
             # 更新笔记关联记录
             success = self._update_note_relation(relation_id, task_ids, video_task_ids)
@@ -112,7 +97,7 @@ class XHSNoteService:
                 return False, "更新笔记关联记录失败", task_ids + video_task_ids
             
             total_tasks = len(task_ids) + len(video_task_ids)
-            return True, f"成功创建 {total_tasks} 个任务（图片：{len(task_ids)}，视频：{len(video_task_ids)}）", task_ids + video_task_ids
+            return True, f"成功创建并处理 {total_tasks} 个任务（图片：{len(task_ids)}，视频：{len(video_task_ids)}）", task_ids + video_task_ids
             
         except Exception as e:
             logger.error(f"处理笔记数据时出错: {str(e)}")
@@ -347,4 +332,40 @@ class XHSNoteService:
         except Exception as e:
             logger.error(f"获取笔记关联记录时出错: {str(e)}")
             logger.error(traceback.format_exc())
-            return None 
+            return None
+
+    def _get_or_create_note_relation(self, note_url: str) -> int:
+        """
+        获取笔记-任务关联记录，如果不存在则创建
+        
+        参数:
+            note_url (str): 笔记URL
+            
+        返回:
+            int: 关联记录ID
+        """
+        try:
+            # 检查是否已存在相同URL的关联记录
+            existing_relation = self.db_manager.execute_query(
+                "SELECT id FROM note_task_relations WHERE note_url = ?",
+                (note_url,)
+            )
+            
+            if existing_relation:
+                return existing_relation[0]["id"]
+            
+            # 创建新关联记录
+            relation_id = self.db_manager.execute_query(
+                """
+                INSERT INTO note_task_relations (note_url, task_ids, video_task_ids, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                (note_url, "[]", "[]", "pending", datetime.now().isoformat(), datetime.now().isoformat())
+            )[0]["id"]
+            
+            return relation_id
+        except Exception as e:
+            logger.error(f"获取笔记关联记录时出错: {str(e)}")
+            logger.error(traceback.format_exc())
+            return -1 

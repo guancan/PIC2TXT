@@ -166,10 +166,13 @@ class XHSNoteService:
             
             # 获取所有任务的结果
             all_results = []
-            for task_id in task_ids:
+            for i, task_id in enumerate(task_ids):
                 result = self.task_service.get_task_result(task_id)
                 if result and "text_content" in result:
-                    all_results.append(result["text_content"])
+                    # 添加图片序号标记
+                    image_index = i + 1
+                    marked_result = f"【图片{image_index}内容解析】\n{result['text_content']}"
+                    all_results.append(marked_result)
             
             # 合并结果
             return "\n\n".join(all_results)
@@ -211,10 +214,13 @@ class XHSNoteService:
             
             # 获取所有视频任务的结果
             all_results = []
-            for task_id in video_task_ids:
+            for i, task_id in enumerate(video_task_ids):
                 result = self.task_service.get_task_result(task_id)
                 if result and "text_content" in result:
-                    all_results.append(result["text_content"])
+                    # 添加视频序号标记
+                    video_index = i + 1
+                    marked_result = f"【视频语音字幕解析{video_index}】\n{result['text_content']}"
+                    all_results.append(marked_result)
             
             # 合并结果
             return "\n\n".join(all_results)

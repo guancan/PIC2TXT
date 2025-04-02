@@ -17,7 +17,7 @@ os.makedirs("data/images", exist_ok=True)  # 为图片提取创建目录
 
 # 设置页面配置
 st.set_page_config(
-    page_title="图片文字识别工具",
+    page_title="媒体资源文字提取",
     page_icon="📷",
     layout="wide",
     initial_sidebar_state="expanded"

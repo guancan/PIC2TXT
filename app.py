@@ -25,17 +25,21 @@ st.set_page_config(
 
 # 侧边栏导航
 st.sidebar.title("功能菜单")
-page = st.sidebar.radio("选择功能", ["图片处理", "视频处理", "任务管理", "查看结果", "CSV处理"])
+page = st.sidebar.radio("选择功能", ["CSV处理", "图片处理", "视频处理", "任务管理", "查看结果"])
 
 # Mistral API密钥设置
-mistral_api_key = st.sidebar.text_input("Mistral API密钥", type="password")
+mistral_api_key = st.sidebar.text_input("Mistral API密钥", 
+                                        placeholder="可选，不填则使用默认配置", 
+                                        type="password")
 if mistral_api_key:
     os.environ["MISTRAL_API_KEY"] = mistral_api_key
     config.MISTRAL_API_KEY = mistral_api_key
     st.sidebar.success("Mistral API密钥已设置")
 
 # 阿里云API密钥设置
-ali_api_key = st.sidebar.text_input("阿里云Paraformer API密钥", type="password")
+ali_api_key = st.sidebar.text_input("阿里云Paraformer API密钥", 
+                                   placeholder="可选，不填则使用默认配置", 
+                                   type="password")
 if ali_api_key:
     os.environ["ALI_PARAFORMER_API_KEY"] = ali_api_key
     config.ALI_PARAFORMER_API_KEY = ali_api_key

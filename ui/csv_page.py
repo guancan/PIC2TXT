@@ -35,6 +35,29 @@ def render_upload_tab(csv_service: CSVService):
     st.header("上传CSV文件")
     st.write("上传包含小红书笔记链接的CSV文件，系统将自动处理并提取图片和视频内容。")
     
+    # 添加CSV文件格式说明在上传说明下方
+    with st.expander("CSV文件格式说明", expanded=False):
+        st.write("""
+        CSV文件必须包含以下列:
+        - **note_url**: 小红书笔记URL
+        - **image_list**: 图片URL列表，多个URL用逗号分隔（可选）
+        - **video_url**: 视频URL（可选）
+        
+        系统将自动添加以下列:
+        - **image_txt**: OCR识别的图片文本内容
+        - **video_txt**: 视频字幕内容（如果启用视频处理）
+        """)
+        
+        # 示例数据
+        example_data = {
+            "note_url": ["https://www.xiaohongshu.com/note/123456", "https://www.xiaohongshu.com/note/789012"],
+            "image_list": ["https://example.com/img1.jpg,https://example.com/img2.jpg", "https://example.com/img3.jpg"],
+            "video_url": ["https://www.xiaohongshu.com/video/123456", ""]
+        }
+        example_df = pd.DataFrame(example_data)
+        st.write("示例数据:")
+        st.dataframe(example_df)
+    
     # 文件上传
     uploaded_file = st.file_uploader("选择CSV文件", type=["csv"], help="CSV文件必须包含note_url列，可选包含image_list和video_url列")
     
@@ -42,21 +65,26 @@ def render_upload_tab(csv_service: CSVService):
     col1, col2 = st.columns(2)
     
     with col1:
-        # OCR引擎选择
-        ocr_engine = st.selectbox(
-            "选择OCR引擎",
-            options=["mistral", "local", "nlp"],
-            format_func=lambda x: {
-                "mistral": "Mistral AI OCR (推荐)",
-                "local": "本地PaddleOCR",
-                "nlp": "Mistral AI NLP"
-            }.get(x, x),
-            help="选择用于处理图片的OCR引擎"
-        )
+        # 添加图片处理选项（默认选中）
+        process_image = st.checkbox("处理图片内容", value=True, help="启用后将处理CSV中的图片链接并提取文本")
+        
+        # OCR引擎选择（仅当启用图片处理时显示）
+        ocr_engine = None
+        if process_image:
+            ocr_engine = st.selectbox(
+                "选择OCR引擎",
+                options=["mistral", "local", "nlp"],
+                format_func=lambda x: {
+                    "mistral": "Mistral AI OCR (推荐)",
+                    "local": "本地PaddleOCR",
+                    "nlp": "Mistral AI NLP"
+                }.get(x, x),
+                help="选择用于处理图片的OCR引擎"
+            )
     
     with col2:
-        # 添加视频处理选项
-        process_video = st.checkbox("处理视频内容", value=False, help="启用后将处理CSV中的视频链接并提取字幕")
+        # 添加视频处理选项（默认选中）
+        process_video = st.checkbox("处理视频内容", value=True, help="启用后将处理CSV中的视频链接并提取字幕")
         
         # 视频引擎选择（仅当启用视频处理时显示）
         video_engine = None
@@ -72,49 +100,48 @@ def render_upload_tab(csv_service: CSVService):
             # 检查API密钥是否已配置
             if not config.ALI_PARAFORMER_API_KEY:
                 st.warning("⚠️ 未设置阿里云Paraformer API密钥，视频处理将无法进行。请在设置中配置API密钥。")
-    
-    # 视频处理高级设置
-    if process_video:
-        with st.expander("视频处理高级设置", expanded=False):
-            # 说话人分离开关
-            diarization_enabled = st.checkbox("启用说话人分离", value=False, 
-                                            help="启用后可以区分不同说话人的内容")
             
-            # 说话人数量设置
-            speaker_count = None
-            if diarization_enabled:
-                speaker_count_enabled = st.checkbox("指定说话人数量", value=False,
-                                                help="不指定时，系统将自动判断说话人数量")
-                if speaker_count_enabled:
-                    speaker_count = st.slider("说话人数量", min_value=2, max_value=10, value=3, 
-                                            help="设置视频中预计的说话人数量，有助于提高识别准确率")
-            
-            # 语言选择
-            languages = st.multiselect(
-                "语言选择",
-                options=["中文", "英文", "日语", "韩语", "德语", "法语", "俄语", "粤语"],
-                default=["中文", "英文"],
-                help="选择视频中可能出现的语言，支持多语言混合识别"
-            )
-            
-            # 语言代码映射
-            language_codes = {
-                "中文": "zh",
-                "英文": "en",
-                "日语": "ja",
-                "韩语": "ko",
-                "德语": "de",
-                "法语": "fr",
-                "俄语": "ru",
-                "粤语": "yue"
-            }
-            
-            # 转换为API需要的语言代码
-            language_hints = [language_codes[lang] for lang in languages if lang in language_codes]
-            
-            # 如果用户没有选择任何语言，使用默认值
-            if not language_hints:
-                language_hints = ["zh", "en"]
+            # 视频处理高级设置
+            with st.expander("视频处理高级设置", expanded=False):
+                # 说话人分离开关
+                diarization_enabled = st.checkbox("启用说话人分离", value=False, 
+                                                help="启用后可以区分不同说话人的内容")
+                
+                # 说话人数量设置
+                speaker_count = None
+                if diarization_enabled:
+                    speaker_count_enabled = st.checkbox("指定说话人数量", value=False,
+                                                    help="不指定时，系统将自动判断说话人数量")
+                    if speaker_count_enabled:
+                        speaker_count = st.slider("说话人数量", min_value=2, max_value=10, value=3, 
+                                                help="设置视频中预计的说话人数量，有助于提高识别准确率")
+                
+                # 语言选择
+                languages = st.multiselect(
+                    "语言选择",
+                    options=["中文", "英文", "日语", "韩语", "德语", "法语", "俄语", "粤语"],
+                    default=["中文", "英文"],
+                    help="选择视频中可能出现的语言，支持多语言混合识别"
+                )
+                
+                # 语言代码映射
+                language_codes = {
+                    "中文": "zh",
+                    "英文": "en",
+                    "日语": "ja",
+                    "韩语": "ko",
+                    "德语": "de",
+                    "法语": "fr",
+                    "俄语": "ru",
+                    "粤语": "yue"
+                }
+                
+                # 转换为API需要的语言代码
+                language_hints = [language_codes[lang] for lang in languages if lang in language_codes]
+                
+                # 如果用户没有选择任何语言，使用默认值
+                if not language_hints:
+                    language_hints = ["zh", "en"]
     
     # 处理按钮
     if uploaded_file is not None:
@@ -142,7 +169,7 @@ def render_upload_tab(csv_service: CSVService):
                 # 处理CSV文件
                 success, message, output_file = csv_service.process_csv_file(
                     temp_file_path, 
-                    ocr_engine=ocr_engine,
+                    ocr_engine=ocr_engine if process_image else None,
                     process_video=process_video,
                     video_engine=video_engine
                 )
@@ -169,29 +196,6 @@ def render_upload_tab(csv_service: CSVService):
                             st.error(f"预览结果时出错: {str(e)}")
                 else:
                     st.error(message)
-    
-    # 使用说明
-    with st.expander("CSV文件格式说明"):
-        st.write("""
-        CSV文件必须包含以下列:
-        - **note_url**: 小红书笔记URL
-        - **image_list**: 图片URL列表，多个URL用逗号分隔（可选）
-        - **video_url**: 视频URL（可选）
-        
-        系统将自动添加以下列:
-        - **image_txt**: OCR识别的图片文本内容
-        - **video_txt**: 视频字幕内容（如果启用视频处理）
-        """)
-        
-        # 示例数据
-        example_data = {
-            "note_url": ["https://www.xiaohongshu.com/note/123456", "https://www.xiaohongshu.com/note/789012"],
-            "image_list": ["https://example.com/img1.jpg,https://example.com/img2.jpg", "https://example.com/img3.jpg"],
-            "video_url": ["https://www.xiaohongshu.com/video/123456", ""]
-        }
-        example_df = pd.DataFrame(example_data)
-        st.write("示例数据:")
-        st.dataframe(example_df)
 
 def render_results_tab(csv_service: CSVService):
     """渲染查看结果标签页"""

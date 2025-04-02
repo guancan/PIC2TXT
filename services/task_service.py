@@ -16,6 +16,7 @@ from services.ocr_factory import OCRFactory
 from services.video_service import VideoService
 import config
 import uuid
+import concurrent.futures
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -382,3 +383,100 @@ class TaskService:
             "status": task.get("status"),
             "error_message": task.get("error_message")
         }
+
+    def process_tasks_in_parallel(self, task_ids, max_workers=5):
+        """
+        并行处理多个任务
+        
+        参数:
+            task_ids (List[int]): 任务ID列表
+            max_workers (int): 最大并行工作线程数
+            
+        返回:
+            Dict[int, bool]: 任务ID到处理结果的映射
+        """
+        results = {}
+        
+        # 将任务分为图片任务和视频任务
+        image_tasks = []
+        video_tasks = []
+        
+        for task_id in task_ids:
+            task = self.get_task(task_id)
+            if not task:
+                results[task_id] = False
+                continue
+                
+            if task.get("task_type") == TASK_TYPE_IMAGE:
+                image_tasks.append(task_id)
+            elif task.get("task_type") == TASK_TYPE_VIDEO:
+                video_tasks.append(task_id)
+        
+        logger.info(f"开始并行处理 {len(image_tasks)} 个图片任务和 {len(video_tasks)} 个视频任务")
+        
+        # 使用线程池并行处理任务
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有图片任务
+            image_futures = {executor.submit(self.process_task, task_id): task_id for task_id in image_tasks}
+            
+            # 提交所有视频任务
+            video_futures = {executor.submit(self.process_video_task, task_id): task_id for task_id in video_tasks}
+            
+            # 合并所有future
+            all_futures = {**image_futures, **video_futures}
+            
+            # 等待所有任务完成
+            for future in concurrent.futures.as_completed(all_futures):
+                task_id = all_futures[future]
+                try:
+                    success = future.result()
+                    results[task_id] = success
+                except Exception as e:
+                    logger.error(f"处理任务 {task_id} 时出错: {str(e)}")
+                    results[task_id] = False
+        
+        return results
+
+    def process_tasks_parallel(self, tasks, max_workers=None):
+        """
+        并行处理多个任务
+        
+        参数:
+            tasks (list): 任务列表，每个任务是一个字典，包含任务信息
+            max_workers (int): 最大工作线程数，默认为None（使用系统默认值）
+            
+        返回:
+            list: 处理结果列表
+        """
+        if not tasks:
+            return []
+        
+        # 如果未指定max_workers，根据任务数量和CPU核心数确定
+        if max_workers is None:
+            import multiprocessing
+            max_workers = min(len(tasks), multiprocessing.cpu_count() * 2)
+        
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有任务
+            future_to_task = {
+                executor.submit(self.process_task, task): task for task in tasks
+            }
+            
+            # 获取结果
+            for future in concurrent.futures.as_completed(future_to_task):
+                task = future_to_task[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    logger.info(f"任务完成: {task.get('id', 'unknown')}")
+                except Exception as e:
+                    logger.error(f"处理任务时出错: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    results.append({
+                        "success": False,
+                        "error": f"处理任务时出错: {str(e)}",
+                        "task_id": task.get('id', -1)
+                    })
+        
+        return results

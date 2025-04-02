@@ -18,16 +18,17 @@ import os
 import json
 import logging
 import pandas as pd
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 import traceback
 from datetime import datetime
+import concurrent.futures
 
 from utils.csv_utils import read_csv, write_csv, extract_image_urls, validate_csv_structure, add_column_if_not_exists
 from database.db_manager import DatabaseManager
 from services.task_service import TaskService
 from services.xhs_note_service import XHSNoteService
 import config
-from database.models import VIDEO_ENGINE_ALI_PARAFORMER, TASK_TYPE_VIDEO
+from database.models import VIDEO_ENGINE_ALI_PARAFORMER, TASK_TYPE_IMAGE, TASK_TYPE_VIDEO
 from utils.video_utils import is_valid_video_url
 
 # 设置日志
@@ -86,10 +87,11 @@ class CSVService:
             # 记录数据源
             source_id = self._register_data_source(file_path, "csv")
             
-            # 处理每一行数据
+            # 处理每一行数据，创建任务
             total_rows = len(df)
             processed_rows = 0
             failed_rows = 0
+            all_task_ids = set()  # 收集所有任务ID
             
             for index, row in df.iterrows():
                 try:
@@ -104,19 +106,20 @@ class CSVService:
                     note_data = {
                         "note_url": note_url,
                         "image_list": row.get("image_list", ""),
-                        "video_url": row.get("video_url", "")  # 添加视频URL字段
+                        "video_url": row.get("video_url", "")
                     }
                     
-                    # 处理笔记数据
+                    # 处理笔记数据，创建任务
                     success, message, task_ids = self.note_service.process_note(
                         note_data, 
                         ocr_engine=ocr_engine,
-                        process_video=process_video,  # 添加视频处理参数
-                        video_engine=video_engine     # 添加视频引擎参数
+                        process_video=process_video,
+                        video_engine=video_engine
                     )
                     
                     if success:
                         processed_rows += 1
+                        all_task_ids.update(task_ids)
                         logger.info(f"成功处理行 {index+1}: {message}")
                     else:
                         failed_rows += 1
@@ -127,32 +130,12 @@ class CSVService:
                     logger.error(f"处理行 {index+1} 时出错: {str(e)}")
                     logger.error(traceback.format_exc())
             
-            # 更新每一行的处理结果
-            updated_rows = 0
-            for index, row in df.iterrows():
-                try:
-                    note_url = row["note_url"]
-                    if not note_url:
-                        continue
-                    
-                    # 获取OCR结果
-                    ocr_result = self.note_service.get_note_ocr_results(note_url)
-                    if ocr_result:
-                        df.at[index, "image_txt"] = ocr_result
-                        updated_rows += 1
-                        logger.info(f"已更新行 {index+1} 的OCR结果，长度: {len(ocr_result)}")
-                    
-                    # 获取视频处理结果
-                    if process_video:
-                        video_result = self.note_service.get_note_video_results(note_url)
-                        if video_result:
-                            df.at[index, "video_txt"] = video_result
-                            logger.info(f"已更新行 {index+1} 的视频处理结果，长度: {len(video_result)}")
-                except Exception as e:
-                    logger.error(f"更新行 {index+1} 的处理结果时出错: {str(e)}")
-                    logger.error(traceback.format_exc())
+            # 并行处理所有任务
+            if all_task_ids:
+                self._process_tasks_in_parallel(all_task_ids)
             
-            logger.info(f"共更新了 {updated_rows}/{total_rows} 行的处理结果")
+            # 更新CSV文件中的处理结果
+            updated_rows = self._update_results(df, process_video)
             
             # 生成输出文件路径
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -172,6 +155,99 @@ class CSVService:
             logger.error(f"处理CSV文件时出错: {str(e)}")
             logger.error(traceback.format_exc())
             return False, f"处理CSV文件时出错: {str(e)}", None
+    
+    def _process_tasks_in_parallel(self, task_ids: Set[int], max_workers: int = 5):
+        """
+        并行处理多个任务
+        
+        参数:
+            task_ids (Set[int]): 任务ID集合
+            max_workers (int): 最大并行工作线程数
+        """
+        # 将任务分为图片任务和视频任务
+        image_tasks = []
+        video_tasks = []
+        
+        for task_id in task_ids:
+            task = self.task_service.get_task(task_id)
+            if not task:
+                continue
+                
+            if task.get("task_type") == TASK_TYPE_IMAGE:
+                image_tasks.append(task_id)
+            elif task.get("task_type") == TASK_TYPE_VIDEO:
+                video_tasks.append(task_id)
+        
+        logger.info(f"开始并行处理 {len(image_tasks)} 个图片任务和 {len(video_tasks)} 个视频任务")
+        
+        # 使用线程池并行处理任务
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有图片任务
+            image_futures = {executor.submit(self.task_service.process_task, task_id): task_id for task_id in image_tasks}
+            
+            # 提交所有视频任务
+            video_futures = {executor.submit(self.task_service.process_video_task, task_id): task_id for task_id in video_tasks}
+            
+            # 合并所有future
+            all_futures = {**image_futures, **video_futures}
+            
+            # 等待所有任务完成
+            for future in concurrent.futures.as_completed(all_futures):
+                task_id = all_futures[future]
+                try:
+                    success = future.result()
+                    if success:
+                        logger.info(f"任务 {task_id} 处理成功")
+                    else:
+                        logger.warning(f"任务 {task_id} 处理失败")
+                except Exception as e:
+                    logger.error(f"处理任务 {task_id} 时出错: {str(e)}")
+        
+        logger.info(f"所有任务处理完成")
+    
+    def _update_results(self, df, include_video=False):
+        """
+        更新CSV中的处理结果
+        
+        参数:
+            df (pandas.DataFrame): 数据框
+            include_video (bool): 是否包含视频处理结果
+            
+        返回:
+            int: 更新的行数
+        """
+        total_rows = len(df)
+        updated_rows = 0
+        
+        for index, row in df.iterrows():
+            try:
+                note_url = row.get("note_url")
+                if not note_url:
+                    continue
+                
+                # 标准化笔记URL
+                note_url = self.note_service._normalize_note_url(note_url)
+                
+                # 获取OCR结果
+                ocr_result = self.note_service.get_note_ocr_results(note_url)
+                if ocr_result:
+                    df.at[index, "image_txt"] = ocr_result
+                    updated_rows += 1
+                    logger.info(f"已更新行 {index+1} 的OCR结果，长度: {len(ocr_result)}")
+                
+                # 获取视频处理结果
+                if include_video:
+                    video_result = self.note_service.get_note_video_results(note_url)
+                    if video_result:
+                        df.at[index, "video_txt"] = video_result
+                        logger.info(f"已更新行 {index+1} 的视频处理结果，长度: {len(video_result)}")
+            
+            except Exception as e:
+                logger.error(f"更新行 {index+1} 的处理结果时出错: {str(e)}")
+                logger.error(traceback.format_exc())
+        
+        logger.info(f"共更新了 {updated_rows}/{total_rows} 行的处理结果")
+        return updated_rows
     
     def update_csv_with_results(self, file_path: str, include_video: bool = False) -> Tuple[bool, str, Optional[str]]:
         """

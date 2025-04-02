@@ -34,6 +34,32 @@ from database.models import TASK_TYPE_VIDEO, VIDEO_ENGINE_ALI_PARAFORMER
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# 添加图片URL验证函数
+def is_valid_image_url(url):
+    """
+    检查URL是否为有效的图片URL
+    
+    参数:
+        url (str): 要检查的URL
+        
+    返回:
+        bool: 是否为有效的图片URL
+    """
+    if not url:
+        return False
+    
+    # 简单验证URL格式
+    url = url.lower().strip()
+    valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+    
+    # 检查URL是否以有效的图片扩展名结尾
+    has_valid_extension = any(url.endswith(ext) for ext in valid_extensions)
+    
+    # 小红书图片URL可能不带扩展名，但通常包含特定的域名
+    is_xhs_image = 'xhscdn.com' in url or 'xiaohongshu.com' in url
+    
+    return has_valid_extension or is_xhs_image
+
 class XHSNoteService:
     """小红书笔记处理服务类"""
     
@@ -48,12 +74,12 @@ class XHSNoteService:
         self.db_manager = db_manager or DatabaseManager(config.DB_PATH)
         self.task_service = task_service or TaskService()
     
-    def process_note(self, note_data: Dict[str, Any], ocr_engine: str = "mistral", process_video: bool = False, video_engine: str = VIDEO_ENGINE_ALI_PARAFORMER) -> Tuple[bool, str, List[int]]:
+    def process_note(self, note_data, ocr_engine="mistral", process_video=False, video_engine=VIDEO_ENGINE_ALI_PARAFORMER):
         """
-        处理单个小红书笔记数据
+        处理单个笔记数据，提取图片和视频并创建处理任务
         
         参数:
-            note_data (Dict[str, Any]): 笔记数据字典
+            note_data (dict): 笔记数据，包含note_url, image_list, video_url等字段
             ocr_engine (str): OCR引擎类型
             process_video (bool): 是否处理视频
             video_engine (str): 视频处理引擎类型
@@ -62,61 +88,52 @@ class XHSNoteService:
             Tuple[bool, str, List[int]]: (是否成功, 消息, 任务ID列表)
         """
         try:
-            # 获取笔记URL
-            note_url = note_data.get("note_url", "")
+            note_url = note_data.get("note_url")
             if not note_url:
                 return False, "笔记URL为空", []
             
-            # 创建或获取笔记关联记录
-            relation_id = self._get_or_create_note_relation(note_url)
-            if relation_id <= 0:
-                return False, "创建笔记关联记录失败", []
+            # 标准化笔记URL
+            note_url = self._normalize_note_url(note_url)
             
-            # 处理图片
-            task_ids = []
+            # 获取图片列表和视频URL
             image_list = note_data.get("image_list", "")
-            if image_list:
-                image_urls = extract_image_urls(image_list)
-                for img_url in image_urls:
-                    if img_url:
-                        # 创建OCR任务
-                        task_id = self.task_service.create_task(url=img_url, ocr_engine=ocr_engine)
-                        if task_id > 0:
-                            task_ids.append(task_id)
-                            # 立即处理任务
-                            self.task_service.process_task(task_id)
+            video_url = note_data.get("video_url", "")
             
-            # 处理视频
+            # 提取图片URL
+            image_urls = extract_image_urls(image_list)
+            
+            # 创建任务列表
+            task_ids = []
+            image_task_ids = []
             video_task_ids = []
             
-            if process_video:
-                # 只处理video_url字段中的视频，不处理note_url
-                video_url = note_data.get("video_url", "")
-                if video_url and is_valid_video_url(video_url):
-                    # 创建视频任务
-                    video_task_id = self.task_service.create_video_task(
-                        url=video_url,
-                        video_engine=video_engine,
-                    )
-                    if video_task_id > 0:
-                        video_task_ids.append(video_task_id)
-                        # 立即处理视频任务
-                        self.task_service.process_video_task(video_task_id)
+            # 创建图片任务
+            if image_urls:
+                for image_url in image_urls:
+                    if is_valid_image_url(image_url):
+                        task_id = self.task_service.create_task(url=image_url, ocr_engine=ocr_engine)
+                        image_task_ids.append(task_id)
+                        task_ids.append(task_id)
             
-            # 更新笔记关联记录
-            success = self._update_note_relation(relation_id, task_ids, video_task_ids)
-            if not success:
-                return False, "更新笔记关联记录失败", task_ids + video_task_ids
+            # 创建视频任务
+            if process_video and video_url and is_valid_video_url(video_url):
+                video_task_id = self.task_service.create_video_task(url=video_url, video_engine=video_engine)
+                video_task_ids.append(video_task_id)
+                task_ids.append(video_task_id)
             
-            total_tasks = len(task_ids) + len(video_task_ids)
-            return True, f"成功创建并处理 {total_tasks} 个任务（图片：{len(task_ids)}，视频：{len(video_task_ids)}）", task_ids + video_task_ids
+            # 保存笔记与任务的关联关系
+            if task_ids:
+                self._save_note_task_relation(note_url, image_task_ids, video_task_ids)
+            
+            # 返回结果
+            return True, f"成功创建 {len(task_ids)} 个任务（图片：{len(image_task_ids)}，视频：{len(video_task_ids)}）", task_ids
             
         except Exception as e:
             logger.error(f"处理笔记数据时出错: {str(e)}")
             logger.error(traceback.format_exc())
             return False, f"处理笔记数据时出错: {str(e)}", []
     
-    def get_note_ocr_results(self, note_url: str) -> str:
+    def get_note_ocr_results(self, note_url):
         """
         获取笔记的OCR结果
         
@@ -127,35 +144,35 @@ class XHSNoteService:
             str: 合并后的OCR结果文本
         """
         try:
-            # 获取笔记关联记录
-            relation = self._get_note_relation(note_url)
+            # 获取笔记关联的任务ID
+            relation = self.db_manager.execute_query(
+                """
+                SELECT task_ids FROM note_task_relations 
+                WHERE note_url = ?
+                """,
+                (note_url,)
+            )
+            
             if not relation:
                 logger.warning(f"找不到笔记关联记录: {note_url}")
                 return ""
             
-            # 获取任务ID列表
-            task_ids = json.loads(relation["task_ids"]) if relation["task_ids"] else []
-            if not task_ids:
-                logger.warning(f"笔记没有关联任务: {note_url}")
+            # 解析任务ID列表
+            try:
+                task_ids = json.loads(relation[0]["task_ids"])
+            except (json.JSONDecodeError, KeyError):
+                logger.error(f"解析任务ID列表失败: {relation[0]['task_ids']}")
                 return ""
             
-            # 获取所有任务的OCR结果
-            results = []
-            for i, task_id in enumerate(task_ids):
+            # 获取所有任务的结果
+            all_results = []
+            for task_id in task_ids:
                 result = self.task_service.get_task_result(task_id)
-                if result and result.get("text_content"):
-                    # 添加图片标记
-                    image_text = f"[图片{i+1}的文本]\n{result['text_content']}\n[图片{i+1}文本结束]"
-                    results.append(image_text)
+                if result and "text_content" in result:
+                    all_results.append(result["text_content"])
             
-            # 合并OCR结果
-            if not results:
-                logger.warning(f"笔记没有OCR结果: {note_url}")
-                return ""
-            
-            # 合并所有结果，每个结果之间添加换行符
-            combined_text = "\n\n".join(results)
-            return combined_text
+            # 合并结果
+            return "\n\n".join(all_results)
         except Exception as e:
             logger.error(f"获取笔记OCR结果时出错: {str(e)}")
             logger.error(traceback.format_exc())
@@ -172,37 +189,37 @@ class XHSNoteService:
             str: 视频处理结果文本
         """
         try:
-            # 获取笔记关联记录
-            relation = self._get_note_relation(note_url)
+            # 获取笔记关联的视频任务ID
+            relation = self.db_manager.execute_query(
+                """
+                SELECT video_task_ids FROM note_task_relations 
+                WHERE note_url = ?
+                """,
+                (note_url,)
+            )
+            
             if not relation:
                 logger.warning(f"找不到笔记关联记录: {note_url}")
                 return ""
             
-            # 获取视频任务ID列表
-            video_task_ids = json.loads(relation["video_task_ids"]) if relation.get("video_task_ids") else []
-            if not video_task_ids:
-                logger.warning(f"笔记没有关联视频任务: {note_url}")
+            # 解析视频任务ID列表
+            try:
+                video_task_ids = json.loads(relation[0]["video_task_ids"])
+            except (json.JSONDecodeError, TypeError):
+                logger.error(f"解析视频任务ID列表失败: {relation[0]['video_task_ids']}")
                 return ""
             
-            # 获取所有视频任务的处理结果
-            results = []
-            for i, task_id in enumerate(video_task_ids):
+            # 获取所有视频任务的结果
+            all_results = []
+            for task_id in video_task_ids:
                 result = self.task_service.get_task_result(task_id)
-                if result and result.get("text_content"):
-                    # 添加视频标记
-                    video_text = f"[视频{i+1}的文本]\n{result['text_content']}\n[视频{i+1}文本结束]"
-                    results.append(video_text)
+                if result and "text_content" in result:
+                    all_results.append(result["text_content"])
             
-            # 合并处理结果
-            if not results:
-                logger.warning(f"笔记没有视频处理结果: {note_url}")
-                return ""
-            
-            # 合并所有结果，每个结果之间添加换行符
-            combined_text = "\n\n".join(results)
-            return combined_text
+            # 合并结果
+            return "\n\n".join(all_results)
         except Exception as e:
-            logger.error(f"获取笔记视频处理结果时出错: {str(e)}")
+            logger.error(f"获取笔记视频结果时出错: {str(e)}")
             logger.error(traceback.format_exc())
             return ""
     
@@ -380,4 +397,109 @@ class XHSNoteService:
         except Exception as e:
             logger.error(f"获取笔记关联记录时出错: {str(e)}")
             logger.error(traceback.format_exc())
-            return -1 
+            return -1
+
+    def _save_note_task_relation(self, note_url, image_task_ids, video_task_ids):
+        """
+        保存笔记与任务的关联关系
+        
+        参数:
+            note_url (str): 笔记URL
+            image_task_ids (list): 图片任务ID列表
+            video_task_ids (list): 视频任务ID列表
+            
+        返回:
+            int: 关联记录ID，失败返回-1
+        """
+        try:
+            # 将任务ID列表转换为JSON字符串
+            image_task_ids_json = json.dumps(image_task_ids)
+            video_task_ids_json = json.dumps(video_task_ids)
+            
+            # 检查是否已存在关联记录
+            relation_id = self.get_note_relation_id(note_url)
+            
+            if relation_id > 0:
+                # 更新现有记录
+                self.db_manager.execute_query(
+                    """
+                    UPDATE note_task_relations 
+                    SET task_ids = ?, video_task_ids = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (image_task_ids_json, video_task_ids_json, datetime.now().isoformat(), relation_id)
+                )
+                logger.info(f"更新笔记关联记录 ID: {relation_id}, 笔记: {note_url}")
+            else:
+                # 创建新记录
+                result = self.db_manager.execute_query(
+                    """
+                    INSERT INTO note_task_relations (note_url, task_ids, video_task_ids, status)
+                    VALUES (?, ?, ?, 'pending')
+                    RETURNING id
+                    """,
+                    (note_url, image_task_ids_json, video_task_ids_json)
+                )
+                relation_id = result[0]["id"] if result else -1
+                logger.info(f"创建笔记关联记录 ID: {relation_id}, 笔记: {note_url}")
+            
+            return relation_id
+        except Exception as e:
+            logger.error(f"保存笔记关联记录时出错: {str(e)}")
+            logger.error(traceback.format_exc())
+            return -1
+
+    def get_note_relation_id(self, note_url):
+        """
+        获取笔记关联记录ID
+        
+        参数:
+            note_url (str): 笔记URL
+            
+        返回:
+            int: 关联记录ID，如果不存在则返回-1
+        """
+        try:
+            # 查询数据库获取关联记录ID
+            result = self.db_manager.execute_query(
+                """
+                SELECT id FROM note_task_relations 
+                WHERE note_url = ?
+                """,
+                (note_url,)
+            )
+            
+            return result[0]["id"] if result else -1
+        except Exception as e:
+            logger.error(f"获取笔记关联记录ID时出错: {str(e)}")
+            logger.error(traceback.format_exc())
+            return -1
+
+    def _normalize_note_url(self, url):
+        """
+        标准化笔记URL，移除不必要的参数
+        
+        参数:
+            url (str): 原始笔记URL
+            
+        返回:
+            str: 标准化后的URL
+        """
+        if not url:
+            return ""
+        
+        # 移除URL中的查询参数
+        import re
+        from urllib.parse import urlparse, urlunparse
+        
+        parsed = urlparse(url)
+        path = parsed.path
+        
+        # 提取笔记ID
+        note_id_match = re.search(r'/explore/([a-zA-Z0-9]+)', path)
+        if note_id_match:
+            note_id = note_id_match.group(1)
+            # 构建标准URL
+            return f"https://www.xiaohongshu.com/explore/{note_id}"
+        
+        return url 

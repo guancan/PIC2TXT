@@ -1,6 +1,17 @@
 """
 CSV表格处理服务
 提供CSV表格的读取、处理和写入功能，支持小红书笔记数据的处理
+
+职责:
+1. 文件级别操作：负责CSV文件的读取、验证和写入
+2. 批量处理：遍历CSV的每一行数据，调用XHSNoteService处理单个笔记
+3. 结果汇总：从XHSNoteService获取处理结果，并回写到CSV文件
+4. 数据源管理：注册和管理CSV数据源
+
+与XHSNoteService的关系:
+- CSVService是更高层次的服务，负责文件级别的操作
+- CSVService调用XHSNoteService处理单个笔记数据
+- CSVService从XHSNoteService获取处理结果，并回写到CSV文件
 """
 
 import os
@@ -297,46 +308,4 @@ class CSVService:
         except Exception as e:
             logger.error(f"注册数据源时出错: {str(e)}")
             logger.error(traceback.format_exc())
-            return -1
-
-    def process_row(self, row, ocr_engine, process_video=False, video_engine=None, video_params=None):
-        """处理CSV的单行数据，创建相应的任务"""
-        note_url = row.get('note_url', '')
-        image_list = row.get('image_list', '')
-        video_url = row.get('video_url', '')
-        
-        image_tasks = []
-        video_tasks = []
-        
-        # 处理图片列表
-        if image_list and ocr_engine:
-            image_urls = [url.strip() for url in image_list.split(',') if url.strip()]
-            for img_url in image_urls:
-                task = self.task_service.create_task(img_url, ocr_engine=ocr_engine)
-                if task:
-                    image_tasks.append(task['id'])
-        
-        # 处理视频URL - 只处理video_url列中的视频，不处理note_url
-        if process_video and video_engine and video_url:
-            # 只处理非空的视频URL
-            if video_url.strip():
-                video_task = self.task_service.create_video_task(
-                    video_url, 
-                    video_engine=video_engine,
-                    params=video_params
-                )
-                if video_task:
-                    video_tasks.append(video_task['id'])
-        
-        # 记录任务关联
-        if note_url:
-            self.xhs_note_service.create_or_update_note_relation(
-                note_url, 
-                image_task_ids=image_tasks,
-                video_task_ids=video_tasks
-            )
-        
-        return {
-            'image_tasks': len(image_tasks),
-            'video_tasks': len(video_tasks)
-        } 
+            return -1 

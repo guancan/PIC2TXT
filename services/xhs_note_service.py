@@ -1,6 +1,18 @@
 """
 小红书笔记处理服务
 提供小红书笔记数据的解析、处理和管理功能
+
+职责:
+1. 笔记级别操作：负责解析单个笔记的数据结构
+2. 资源提取：从笔记中提取图片链接和视频链接
+3. 任务创建：为图片和视频创建OCR和字幕提取任务
+4. 关联管理：维护笔记与任务的关联关系
+5. 结果汇总：汇总同一笔记的多个处理结果
+
+与CSVService的关系:
+- XHSNoteService是更底层的服务，负责笔记级别的操作
+- XHSNoteService被CSVService调用，处理单个笔记数据
+- XHSNoteService将处理结果返回给CSVService，由CSVService回写到CSV文件
 """
 
 import os

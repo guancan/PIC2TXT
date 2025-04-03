@@ -23,6 +23,46 @@ def show_task_page():
     db = DatabaseManager()
     task_service = TaskService()
     
+    # 显示任务进度统计
+    stats = task_service.get_task_statistics()
+    
+    # 创建进度条
+    total = stats["total"]["total"]
+    if total > 0:
+        completed_percent = (stats["total"]["completed"] / total) * 100
+    else:
+        completed_percent = 0
+    
+    st.subheader("任务进度")
+    progress_bar = st.progress(completed_percent / 100)
+    
+    # 显示详细统计信息
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("总任务数", total)
+    with col2:
+        st.metric("已完成", stats["total"]["completed"])
+    with col3:
+        st.metric("完成率", f"{completed_percent:.1f}%")
+    
+    # 显示图片和视频任务统计
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("图片任务")
+        st.write(f"总计: {stats['image']['total']}")
+        st.write(f"已完成: {stats['image']['completed']}")
+        st.write(f"处理中: {stats['image']['processing']}")
+        st.write(f"待处理: {stats['image']['pending']}")
+        st.write(f"失败: {stats['image']['failed']}")
+    
+    with col2:
+        st.write("视频任务")
+        st.write(f"总计: {stats['video']['total']}")
+        st.write(f"已完成: {stats['video']['completed']}")
+        st.write(f"处理中: {stats['video']['processing']}")
+        st.write(f"待处理: {stats['video']['pending']}")
+        st.write(f"失败: {stats['video']['failed']}")
+    
     # 获取所有任务
     try:
         tasks = db.get_all_tasks()

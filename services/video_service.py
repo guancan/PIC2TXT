@@ -31,6 +31,9 @@ class VideoService:
         # 设置API密钥
         dashscope.api_key = self.api_key
         
+        # 调整dashscope库的日志级别，只显示WARNING及以上级别
+        logging.getLogger('dashscope').setLevel(logging.WARNING)
+        
         # 任务重试配置
         self.max_retries = 3
         self.retry_delay = 2  # 初始重试延迟（秒）

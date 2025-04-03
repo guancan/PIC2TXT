@@ -90,7 +90,10 @@ class TaskService:
         ocr_engine = task.get("ocr_engine", "local")
         
         # 更新任务状态为处理中
-        self.db_manager.update_task_status(task_id, TASK_STATUS_PROCESSING)  # 使用db_manager更新状态
+        self.db_manager.update_task_status(task_id, TASK_STATUS_PROCESSING)
+        
+        # 打印当前任务进度
+        self.print_task_progress()
         
         # 控制任务处理频率
         self._wait_for_rate_limit()
@@ -109,7 +112,9 @@ class TaskService:
                     if not file_path:
                         error_msg = "下载失败"
                         logger.error(f"下载失败: {error_msg}")
-                        self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)  # 使用db_manager更新状态
+                        self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                        # 打印更新后的任务进度
+                        self.print_task_progress()
                         return False
                     
                     self.db_manager.update_task_file_path(task_id, file_path)  # 使用db_manager更新文件路径
@@ -131,6 +136,8 @@ class TaskService:
                         if retry_count > self.max_retries:
                             logger.error(f"达到最大重试次数 ({self.max_retries})，任务失败")
                             self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                            # 打印更新后的任务进度
+                            self.print_task_progress()
                             return False
                         
                         wait_time = retry_delay * (1 + random.random())
@@ -141,6 +148,8 @@ class TaskService:
                     else:
                         # 其他错误直接失败
                         self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                        # 打印更新后的任务进度
+                        self.print_task_progress()
                         return False
                 
                 # 保存OCR结果
@@ -151,6 +160,8 @@ class TaskService:
                 
                 # 更新任务状态为已完成
                 self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
+                # 打印更新后的任务进度
+                self.print_task_progress()
                 
                 logger.info(f"任务完成: {task_id}")
                 return True
@@ -164,6 +175,8 @@ class TaskService:
                 if retry_count > self.max_retries:
                     logger.error(f"达到最大重试次数 ({self.max_retries})，任务失败")
                     self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, str(e))
+                    # 打印更新后的任务进度
+                    self.print_task_progress()
                     return False
                 
                 wait_time = retry_delay * (1 + random.random())
@@ -173,6 +186,8 @@ class TaskService:
         
         # 如果执行到这里，说明所有重试都失败了
         self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, "达到最大重试次数后仍然失败")
+        # 打印更新后的任务进度
+        self.print_task_progress()
         return False
     
     def get_task(self, task_id):
@@ -276,6 +291,9 @@ class TaskService:
                 # 更新任务状态为处理中
                 self.db_manager.update_task_status(task_id, TASK_STATUS_PROCESSING)
                 
+                # 打印当前任务进度
+                self.print_task_progress()
+                
                 url = task.get("url")
                 file_path = task.get("file_path")
                 params = task.get("params", {})
@@ -300,14 +318,16 @@ class TaskService:
                             
                             # 更新任务状态为已完成
                             self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
-                            
-                            logger.info(f"视频任务完成: {task_id}")
+                            # 打印更新后的任务进度
+                            self.print_task_progress()
                             return True
                         else:
                             # 处理失败
                             error_msg = video_result.get("error", "未知错误")
                             logger.error(f"视频处理失败: {error_msg}")
                             self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                            # 打印更新后的任务进度
+                            self.print_task_progress()
                             return False
                     else:
                         # 其他视频尝试下载
@@ -317,6 +337,8 @@ class TaskService:
                             error_msg = "下载视频失败"
                             logger.error(f"下载失败: {error_msg}")
                             self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                            # 打印更新后的任务进度
+                            self.print_task_progress()
                             return False
                         
                         self.db_manager.update_task_file_path(task_id, file_path)
@@ -336,14 +358,16 @@ class TaskService:
                         
                         # 更新任务状态为已完成
                         self.db_manager.update_task_status(task_id, TASK_STATUS_COMPLETED)
-                        
-                        logger.info(f"视频任务完成: {task_id}")
+                        # 打印更新后的任务进度
+                        self.print_task_progress()
                         return True
                     else:
                         # 处理失败
                         error_msg = video_result.get("error", "未知错误")
                         logger.error(f"视频处理失败: {error_msg}")
                         self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                        # 打印更新后的任务进度
+                        self.print_task_progress()
                         return False
                 
                 # 如果既没有URL也没有文件路径，则报错
@@ -351,6 +375,8 @@ class TaskService:
                     error_msg = "任务没有URL或文件路径"
                     logger.error(error_msg)
                     self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, error_msg)
+                    # 打印更新后的任务进度
+                    self.print_task_progress()
                     return False
                 
             except Exception as e:
@@ -362,6 +388,8 @@ class TaskService:
                 if retry_count > self.max_retries:
                     logger.error(f"达到最大重试次数 ({self.max_retries})，任务失败")
                     self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, str(e))
+                    # 打印更新后的任务进度
+                    self.print_task_progress()
                     return False
                 
                 wait_time = retry_delay * (1 + random.random())
@@ -371,6 +399,8 @@ class TaskService:
         
         # 如果执行到这里，说明所有重试都失败了
         self.db_manager.update_task_status(task_id, TASK_STATUS_FAILED, "达到最大重试次数后仍然失败")
+        # 打印更新后的任务进度
+        self.print_task_progress()
         return False
 
     def get_task_status(self, task_id):
@@ -480,3 +510,98 @@ class TaskService:
                     })
         
         return results
+
+    def get_task_statistics(self):
+        """
+        获取任务统计信息
+        
+        返回:
+            dict: 包含各种任务状态的统计信息
+        """
+        try:
+            conn = self.db_manager.connect()
+            cursor = conn.cursor()
+            
+            # 获取图片任务统计
+            cursor.execute(
+                """
+                SELECT status, COUNT(*) as count 
+                FROM tasks 
+                WHERE task_type = ? OR task_type IS NULL
+                GROUP BY status
+                """,
+                (TASK_TYPE_IMAGE,)
+            )
+            image_stats = {row['status']: row['count'] for row in cursor.fetchall()}
+            
+            # 获取视频任务统计
+            cursor.execute(
+                """
+                SELECT status, COUNT(*) as count 
+                FROM tasks 
+                WHERE task_type = ?
+                GROUP BY status
+                """,
+                (TASK_TYPE_VIDEO,)
+            )
+            video_stats = {row['status']: row['count'] for row in cursor.fetchall()}
+            
+            # 计算总数
+            total_pending = (image_stats.get(TASK_STATUS_PENDING, 0) + 
+                             video_stats.get(TASK_STATUS_PENDING, 0))
+            total_processing = (image_stats.get(TASK_STATUS_PROCESSING, 0) + 
+                               video_stats.get(TASK_STATUS_PROCESSING, 0))
+            total_completed = (image_stats.get(TASK_STATUS_COMPLETED, 0) + 
+                              video_stats.get(TASK_STATUS_COMPLETED, 0))
+            total_failed = (image_stats.get(TASK_STATUS_FAILED, 0) + 
+                           video_stats.get(TASK_STATUS_FAILED, 0))
+            
+            return {
+                "image": {
+                    "pending": image_stats.get(TASK_STATUS_PENDING, 0),
+                    "processing": image_stats.get(TASK_STATUS_PROCESSING, 0),
+                    "completed": image_stats.get(TASK_STATUS_COMPLETED, 0),
+                    "failed": image_stats.get(TASK_STATUS_FAILED, 0),
+                    "total": sum(image_stats.values())
+                },
+                "video": {
+                    "pending": video_stats.get(TASK_STATUS_PENDING, 0),
+                    "processing": video_stats.get(TASK_STATUS_PROCESSING, 0),
+                    "completed": video_stats.get(TASK_STATUS_COMPLETED, 0),
+                    "failed": video_stats.get(TASK_STATUS_FAILED, 0),
+                    "total": sum(video_stats.values())
+                },
+                "total": {
+                    "pending": total_pending,
+                    "processing": total_processing,
+                    "completed": total_completed,
+                    "failed": total_failed,
+                    "total": sum(image_stats.values()) + sum(video_stats.values())
+                }
+            }
+        except Exception as e:
+            logger.error(f"获取任务统计信息失败: {str(e)}")
+            return {
+                "image": {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "total": 0},
+                "video": {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "total": 0},
+                "total": {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "total": 0}
+            }
+        finally:
+            self.db_manager.close()
+
+    def print_task_progress(self):
+        """打印当前任务进度"""
+        stats = self.get_task_statistics()
+        
+        # 计算完成百分比
+        total = stats["total"]["total"]
+        if total > 0:
+            completed_percent = (stats["total"]["completed"] / total) * 100
+        else:
+            completed_percent = 0
+        
+        logger.info("===== 任务进度统计 =====")
+        logger.info(f"总任务数: {total} | 已完成: {stats['total']['completed']} ({completed_percent:.1f}%) | 处理中: {stats['total']['processing']} | 待处理: {stats['total']['pending']} | 失败: {stats['total']['failed']}")
+        logger.info(f"图片任务: 总计 {stats['image']['total']} | 已完成 {stats['image']['completed']} | 处理中 {stats['image']['processing']} | 待处理 {stats['image']['pending']} | 失败 {stats['image']['failed']}")
+        logger.info(f"视频任务: 总计 {stats['video']['total']} | 已完成 {stats['video']['completed']} | 处理中 {stats['video']['processing']} | 待处理 {stats['video']['pending']} | 失败 {stats['video']['failed']}")
+        logger.info("========================")

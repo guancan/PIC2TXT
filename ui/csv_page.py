@@ -206,48 +206,54 @@ def render_results_tab(csv_service: CSVService):
     uploaded_file = st.file_uploader("选择已处理的CSV文件", type=["csv"], key="result_file_uploader", 
                                     help="上传之前处理过的CSV文件，系统将更新处理结果")
     
-    # 添加视频处理选项
-    include_video = st.checkbox("包含视频处理结果", value=False, 
-                              help="启用后将同时更新视频字幕处理结果")
+    # 添加URL匹配模式选项
+    matching_mode = st.radio(
+        "URL匹配模式",
+        ["严格匹配", "宽松匹配（推荐）"],
+        index=1,
+        help="严格匹配要求URL完全一致，宽松匹配只比较URL的主要部分"
+    )
     
-    # 更新按钮
+    # 视频处理结果选项
+    include_video = st.checkbox("包含视频处理结果", value=True, 
+                               help="选中后将包含视频的转写结果")
+    
+    # 处理按钮
     if uploaded_file is not None:
-        if st.button("更新处理结果"):
+        if st.button("更新处理结果", key="update_results_button"):
             # 保存上传的文件
             temp_file_path = os.path.join(config.TEMP_DIR, uploaded_file.name)
-            os.makedirs(config.TEMP_DIR, exist_ok=True)
-            
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
-            # 显示进度条
+            # 处理文件
             with st.spinner("正在更新处理结果..."):
-                # 更新CSV文件
+                # 传递匹配模式参数
+                strict_matching = matching_mode == "严格匹配"
                 success, message, output_file = csv_service.update_csv_with_results(
-                    temp_file_path,
-                    include_video=include_video
+                    temp_file_path, 
+                    include_video=include_video,
+                    strict_matching=strict_matching
                 )
                 
                 if success:
                     st.success(message)
+                    # 显示下载链接
+                    with open(output_file, "rb") as file:
+                        st.download_button(
+                            label="下载更新后的CSV文件",
+                            data=file,
+                            file_name=os.path.basename(output_file),
+                            mime="text/csv"
+                        )
                     
-                    # 显示更新结果预览
-                    if output_file and os.path.exists(output_file):
-                        try:
-                            df = pd.read_csv(output_file)
-                            st.write("更新结果预览:")
-                            st.dataframe(df.head(10))
-                            
-                            # 提供下载链接
-                            with open(output_file, "rb") as file:
-                                st.download_button(
-                                    label="下载更新后的CSV文件",
-                                    data=file,
-                                    file_name=os.path.basename(output_file),
-                                    mime="text/csv"
-                                )
-                        except Exception as e:
-                            st.error(f"预览结果时出错: {str(e)}")
+                    # 预览结果
+                    try:
+                        df = pd.read_csv(output_file)
+                        st.subheader("预览结果")
+                        st.dataframe(df)
+                    except Exception as e:
+                        st.error(f"预览结果时出错: {str(e)}")
                 else:
                     st.error(message)
     

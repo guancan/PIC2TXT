@@ -249,100 +249,75 @@ class CSVService:
         logger.info(f"共更新了 {updated_rows}/{total_rows} 行的处理结果")
         return updated_rows
     
-    def update_csv_with_results(self, file_path: str, include_video: bool = False) -> Tuple[bool, str, Optional[str]]:
+    def update_csv_with_results(self, csv_file_path: str, include_video: bool = True, strict_matching: bool = False) -> Tuple[bool, str, str]:
         """
-        使用处理结果更新CSV文件
+        更新CSV文件，添加处理结果
         
         参数:
-            file_path (str): CSV文件路径
+            csv_file_path (str): CSV文件路径
             include_video (bool): 是否包含视频处理结果
+            strict_matching (bool): 是否使用严格URL匹配
             
         返回:
-            Tuple[bool, str, Optional[str]]: (是否成功, 消息, 输出文件路径)
+            Tuple[bool, str, str]: (成功标志, 消息, 输出文件路径)
         """
         try:
+            # 检查文件是否存在
+            if not os.path.exists(csv_file_path):
+                return False, f"文件不存在: {csv_file_path}", ""
+            
             # 读取CSV文件
-            df = read_csv(file_path)
-            if df is None:
-                return False, "无法读取CSV文件", None
+            df = pd.read_csv(csv_file_path)
             
-            # 验证CSV结构
-            required_fields = ["note_url"]
-            is_valid, error_msg = validate_csv_structure(df, required_fields)
-            if not is_valid:
-                return False, error_msg, None
+            # 检查是否包含note_url列
+            if 'note_url' not in df.columns:
+                return False, "CSV文件中缺少note_url列", ""
             
-            # 添加image_txt列和video_txt列（如果不存在）
-            df = add_column_if_not_exists(df, "image_txt", "")
-            if include_video:
-                df = add_column_if_not_exists(df, "video_txt", "")
+            # 创建XHSNoteService实例
+            xhs_note_service = XHSNoteService(db_manager=self.db_manager)
             
-            # 处理每一行数据
-            total_rows = len(df)
-            updated_rows = 0
+            # 添加OCR结果列和视频转写结果列
+            if 'ocr_result' not in df.columns:
+                df['ocr_result'] = ""
+            if 'video_transcript' not in df.columns and include_video:
+                df['video_transcript'] = ""
             
+            # 遍历每一行，获取处理结果
+            updated_count = 0
             for index, row in df.iterrows():
-                try:
-                    # 获取笔记URL
-                    note_url = row.get("note_url")
-                    if not note_url:
-                        logger.warning(f"行 {index+1} 缺少笔记URL，跳过")
-                        continue
+                note_url = row['note_url']
+                if pd.isna(note_url) or not note_url:
+                    continue
                     
-                    # 获取处理结果
-                    if include_video:
-                        # 获取所有结果（包括图片和视频）
-                        success, message, result_text = self.note_service.get_note_all_results(note_url)
-                    else:
-                        # 只获取图片OCR结果
-                        result_text = self.note_service.get_note_ocr_results(note_url)
-                        success = bool(result_text)
-                    
-                    if success and result_text:
-                        # 更新结果列
-                        if include_video:
-                            # 分别获取图片和视频结果
-                            ocr_text = self.note_service.get_note_ocr_results(note_url)
-                            video_text = self.note_service.get_note_video_results(note_url)
-                            
-                            # 更新对应的列
-                            if ocr_text:
-                                df.at[index, "image_txt"] = ocr_text
-                            if video_text:
-                                df.at[index, "video_txt"] = video_text
-                        else:
-                            # 只更新图片OCR结果
-                            df.at[index, "image_txt"] = result_text
-                        
-                        updated_rows += 1
-                        logger.info(f"成功更新行 {index+1} 的处理结果")
-                    else:
-                        logger.warning(f"行 {index+1} 没有处理结果")
+                # 获取笔记处理结果
+                # 传递strict_matching参数给get_note_processing_results方法
+                results = xhs_note_service.get_note_processing_results(note_url, strict_matching=strict_matching)
                 
-                except Exception as e:
-                    logger.error(f"更新行 {index+1} 时出错: {str(e)}")
-                    logger.error(traceback.format_exc())
+                if results:
+                    # 更新OCR结果
+                    if 'ocr_text' in results and results['ocr_text']:
+                        df.at[index, 'ocr_result'] = results['ocr_text']
+                        updated_count += 1
+                    
+                    # 更新视频转写结果
+                    if include_video and 'video_transcript' in results and results['video_transcript']:
+                        df.at[index, 'video_transcript'] = results['video_transcript']
+                        updated_count += 1
             
-            logger.info(f"共更新了 {updated_rows}/{total_rows} 行的处理结果")
+            # 生成输出文件名
+            timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M")
+            output_dir = os.path.dirname(csv_file_path)
+            base_name = os.path.splitext(os.path.basename(csv_file_path))[0]
+            output_file = os.path.join(output_dir, f"{base_name}_{timestamp}_updated.csv")
             
-            # 生成输出文件路径
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = os.path.join(
-                config.RESULT_DIR, 
-                f"updated_{os.path.basename(file_path).split('.')[0]}_{timestamp}.csv"
-            )
+            # 保存更新后的CSV文件
+            df.to_csv(output_file, index=False)
             
-            # 写入CSV文件
-            success = write_csv(df, output_file)
-            if not success:
-                return False, "写入输出CSV文件失败", None
-            
-            return True, f"成功更新 {updated_rows}/{total_rows} 行的OCR结果", output_file
-            
+            return True, f"成功更新了{updated_count}条记录", output_file
         except Exception as e:
-            logger.error(f"更新CSV文件时出错: {str(e)}")
+            logger.error(f"更新CSV结果时出错: {str(e)}")
             logger.error(traceback.format_exc())
-            return False, f"更新CSV文件时出错: {str(e)}", None
+            return False, f"更新CSV结果时出错: {str(e)}", ""
     
     def _register_data_source(self, source_path: str, source_type: str = "csv") -> int:
         """

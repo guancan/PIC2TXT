@@ -347,23 +347,46 @@ class XHSNoteService:
             logger.error(traceback.format_exc())
             return False
     
-    def _get_note_relation(self, note_url: str) -> Optional[Dict[str, Any]]:
+    def _get_note_relation(self, note_url: str, strict_matching: bool = False) -> Optional[Dict[str, Any]]:
         """
         获取笔记-任务关联记录
         
         参数:
             note_url (str): 笔记URL
-            
-        返回:
-            Optional[Dict[str, Any]]: 关联记录
+            strict_matching (bool): 是否使用严格URL匹配
         """
         try:
-            relation = self.db_manager.execute_query(
-                "SELECT * FROM note_task_relations WHERE note_url = ?",
-                (note_url,)
-            )
+            # 标准化URL
+            normalized_url = self._normalize_note_url(note_url)
             
-            return relation[0] if relation else None
+            query = """
+            SELECT id, note_url, task_ids, video_task_ids, created_at, updated_at
+            FROM note_task_relations
+            WHERE note_url LIKE ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+            
+            # 根据匹配模式决定搜索模式
+            if strict_matching:
+                # 严格匹配，使用完整URL
+                search_pattern = normalized_url
+            else:
+                # 宽松匹配，只匹配URL的主要部分（去掉查询参数）
+                search_pattern = f"%{normalized_url.split('?')[0]}%"
+            
+            result = self.db_manager.execute_query(query, (search_pattern,))
+            if result and len(result) > 0:
+                record = result[0]
+                return {
+                    "id": record["id"],
+                    "note_url": record["note_url"],
+                    "task_ids": json.loads(record["task_ids"]) if record["task_ids"] else [],
+                    "video_task_ids": json.loads(record["video_task_ids"]) if record["video_task_ids"] else [],
+                    "created_at": record["created_at"],
+                    "updated_at": record["updated_at"]
+                }
+            return None
         except Exception as e:
             logger.error(f"获取笔记关联记录时出错: {str(e)}")
             logger.error(traceback.format_exc())
@@ -509,3 +532,108 @@ class XHSNoteService:
             return f"https://www.xiaohongshu.com/explore/{note_id}"
         
         return url 
+
+    def get_note_processing_results(self, note_url: str, strict_matching: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        获取笔记的处理结果
+        
+        参数:
+            note_url (str): 笔记URL
+            strict_matching (bool): 是否使用严格URL匹配
+            
+        返回:
+            Optional[Dict[str, Any]]: 处理结果字典，包含ocr_text和video_transcript
+        """
+        try:
+            # 获取笔记-任务关联记录
+            relation = self._get_note_relation(note_url, strict_matching)
+            if not relation:
+                logger.warning(f"找不到笔记关联记录: {note_url}")
+                return None
+            
+            # 获取OCR任务结果
+            ocr_text = ""
+            for task_id in relation["task_ids"]:
+                task_result = self._get_task_result(task_id)
+                if task_result and task_result.get("text"):
+                    if ocr_text:
+                        ocr_text += "\n\n"
+                    ocr_text += task_result["text"]
+            
+            # 获取视频任务结果
+            video_transcript = ""
+            for task_id in relation["video_task_ids"]:
+                task_result = self._get_task_result(task_id)
+                if task_result and task_result.get("text"):
+                    if video_transcript:
+                        video_transcript += "\n\n"
+                    video_transcript += task_result["text"]
+            
+            return {
+                "ocr_text": ocr_text,
+                "video_transcript": video_transcript
+            }
+        except Exception as e:
+            logger.error(f"获取笔记处理结果时出错: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None 
+        
+    def _get_task_result(self, task_id: int) -> Optional[Dict[str, Any]]:
+        """
+        获取任务处理结果
+        
+        参数:
+            task_id (int): 任务ID
+            
+        返回:
+            Optional[Dict[str, Any]]: 任务处理结果
+        """
+        try:
+            # 查询任务信息 - 不查询result字段
+            task = self.db_manager.execute_query(
+                """
+                SELECT id, task_type, status, file_path, created_at, updated_at
+                FROM tasks
+                WHERE id = ?
+                """,
+                (task_id,)
+            )
+            
+            if not task or len(task) == 0:
+                logger.warning(f"找不到任务: {task_id}")
+                return None
+            
+            task = task[0]
+            
+            # 如果任务未完成，返回None
+            if task["status"] != "completed":
+                return None
+            
+            # 从results表中查询结果
+            result_data = self.db_manager.execute_query(
+                """
+                SELECT id, task_id, text_content, result_path, created_at
+                FROM results
+                WHERE task_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (task_id,)
+            )
+            
+            result = {}
+            
+            # 如果有结果记录
+            if result_data and len(result_data) > 0:
+                result_record = result_data[0]
+                result["text"] = result_record["text_content"]
+                
+                # 如果有文件路径，可以添加到结果中
+                if result_record["result_path"]:
+                    result["file_path"] = result_record["result_path"]
+            
+            return result
+        except Exception as e:
+            logger.error(f"获取任务结果时出错: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None

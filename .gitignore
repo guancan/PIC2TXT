@@ -29,9 +29,9 @@ env/
 # 下载的数据文件
 data/downloads/
 data/results/
+data/
 
 # 数据库文件
-data/
 database.db
 database.db-shm
 database.db-wal

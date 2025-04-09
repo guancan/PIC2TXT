@@ -414,7 +414,7 @@ class TaskService:
             "error_message": task.get("error_message")
         }
 
-    def process_tasks_in_parallel(self, task_ids, max_workers=5):
+    def process_tasks_in_parallel(self, task_ids, max_workers=3):
         """
         并行处理多个任务
         
@@ -464,50 +464,6 @@ class TaskService:
                 except Exception as e:
                     logger.error(f"处理任务 {task_id} 时出错: {str(e)}")
                     results[task_id] = False
-        
-        return results
-
-    def process_tasks_parallel(self, tasks, max_workers=None):
-        """
-        并行处理多个任务
-        
-        参数:
-            tasks (list): 任务列表，每个任务是一个字典，包含任务信息
-            max_workers (int): 最大工作线程数，默认为None（使用系统默认值）
-            
-        返回:
-            list: 处理结果列表
-        """
-        if not tasks:
-            return []
-        
-        # 如果未指定max_workers，根据任务数量和CPU核心数确定
-        if max_workers is None:
-            import multiprocessing
-            max_workers = min(len(tasks), multiprocessing.cpu_count() * 2)
-        
-        results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 提交所有任务
-            future_to_task = {
-                executor.submit(self.process_task, task): task for task in tasks
-            }
-            
-            # 获取结果
-            for future in concurrent.futures.as_completed(future_to_task):
-                task = future_to_task[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    logger.info(f"任务完成: {task.get('id', 'unknown')}")
-                except Exception as e:
-                    logger.error(f"处理任务时出错: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    results.append({
-                        "success": False,
-                        "error": f"处理任务时出错: {str(e)}",
-                        "task_id": task.get('id', -1)
-                    })
         
         return results
 
